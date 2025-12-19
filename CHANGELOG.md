@@ -2,6 +2,14 @@
 
 All notable changes to OSBA (Obsidian Second Brain Agent) will be documented in this file.
 
+## [0.2.2] - 2025-12-20
+
+### Fixed
+- **Statistics Load Error**: Fixed TypeError in `isExcluded` method when tags in frontmatter are not strings
+  - Error message: `TypeError: u.replace is not a function`
+  - Cause: `tag.replace()` was called on non-string tag values in note frontmatter
+  - Affected: Settings tab statistics loading
+
 ## [0.2.1] - 2025-12-20
 
 ### Added

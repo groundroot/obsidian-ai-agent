@@ -1,7 +1,7 @@
 {
   "id": "obsidian-second-brain-agent",
   "name": "Second Brain Agent",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "minAppVersion": "1.4.0",
   "description": "AI-powered Second Brain automation - auto-discover connections, analyze knowledge gaps, and enhance your notes with intelligent insights",
   "author": "OSBA Team",

@@ -466,7 +466,9 @@ export class EmbeddingService {
           : [cache.frontmatter.tags];
 
         for (const tag of tags) {
-          if (this.settings.excludedTags.includes(tag.replace('#', ''))) {
+          // Ensure tag is a string before calling replace
+          const tagStr = typeof tag === 'string' ? tag : String(tag);
+          if (this.settings.excludedTags.includes(tagStr.replace('#', ''))) {
             return true;
           }
         }
