@@ -1,6 +1,6 @@
 {
   "name": "obsidian-second-brain-agent",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "description": "AI-powered Second Brain automation for Obsidian",
   "main": "main.js",
   "scripts": {

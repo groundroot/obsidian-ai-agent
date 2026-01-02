@@ -88,7 +88,7 @@ export const DEFAULT_SETTINGS: OSBASettings = {
   maxNoteSize: 50 * 1024,  // 50KB
   batchSize: 10,
 
-  autoAnalyzeOnCreate: true,
+  autoAnalyzeOnCreate: false,  // Default OFF to prevent unexpected API costs
   autoEmbedOnModify: true,
   enableCostTracking: true,
 
