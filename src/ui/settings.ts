@@ -42,6 +42,15 @@ export class OSBASettingTab extends PluginSettingTab {
 
     if (this.plugin.settings.useOllama) {
       const availableModels = await this.plugin.providerManager.listOllamaModels();
+      const isEmbeddingModel = (model: string): boolean => /embed|embedding|nomic/i.test(model);
+      const generationModels = availableModels.filter(model => !isEmbeddingModel(model));
+      const embeddingModels = availableModels.filter(model => isEmbeddingModel(model));
+      const currentGenerationLooksWrong =
+        !!this.plugin.settings.ollamaGenerationModel &&
+        isEmbeddingModel(this.plugin.settings.ollamaGenerationModel);
+      const currentEmbeddingLooksWrong =
+        !!this.plugin.settings.ollamaEmbeddingModel &&
+        !isEmbeddingModel(this.plugin.settings.ollamaEmbeddingModel);
       const applyGemmaPreset = async (preset: 'manual' | 'gemma-fast' | 'gemma-latest') => {
         this.plugin.settings.ollamaGemmaPreset = preset;
 
@@ -49,6 +58,13 @@ export class OSBASettingTab extends PluginSettingTab {
           this.plugin.settings.ollamaGenerationModel = 'mlx-community/gemma-2-2b-it';
         } else if (preset === 'gemma-latest') {
           this.plugin.settings.ollamaGenerationModel = 'gemma4:e4b';
+        }
+
+        if (
+          !this.plugin.settings.ollamaEmbeddingModel ||
+          !isEmbeddingModel(this.plugin.settings.ollamaEmbeddingModel)
+        ) {
+          this.plugin.settings.ollamaEmbeddingModel = embeddingModels[0] || 'nomic-embed-text:latest';
         }
 
         await this.plugin.saveSettings();
@@ -79,21 +95,6 @@ export class OSBASettingTab extends PluginSettingTab {
           }));
 
       new Setting(containerEl)
-        .setName('Mac용 MLX 안내')
-        .setDesc(
-          isMac
-            ? 'Apple Silicon Mac에서는 최신 Ollama의 MLX 기반 실행 경로를 권장합니다. 이 토글은 안내/추천용이며 실행 엔진을 직접 바꾸지는 않습니다.'
-            : 'Mac 사용자용 MLX 안내를 표시합니다. 실제 실행 엔진을 플러그인이 직접 제어하지는 않습니다.'
-        )
-        .addToggle(toggle => toggle
-          .setValue(this.plugin.settings.showMacMlxGuidance)
-          .onChange(async (value) => {
-            this.plugin.settings.showMacMlxGuidance = value;
-            await this.plugin.saveSettings();
-            this.display();
-          }));
-
-      new Setting(containerEl)
         .setName('Gemma 프리셋')
         .setDesc('Mac에서는 Gemma 계열을 빠르게 추천 설정으로 적용할 수 있습니다')
         .addDropdown(dropdown => dropdown
@@ -106,19 +107,40 @@ export class OSBASettingTab extends PluginSettingTab {
             this.display();
           }));
 
+      const guidanceBox = containerEl.createDiv({ cls: 'setting-item-description' });
+      guidanceBox.style.marginBottom = '1rem';
+      guidanceBox.style.padding = '0.75rem';
+      guidanceBox.style.borderRadius = '8px';
+      guidanceBox.style.backgroundColor = 'var(--background-secondary)';
+
+      guidanceBox.createEl('div', {
+        text: isMac
+          ? 'Mac 안내: Apple Silicon에서는 MLX 기반 추천 모델을 사용할 수 있습니다. 이 플러그인은 MLX를 직접 실행하지 않고, 실행 중인 Ollama 서버에 연결합니다.'
+          : '로컬 모델 안내: 이 플러그인은 실행 중인 Ollama 서버에 연결하며, 모델 실행 자체는 Ollama 런타임이 담당합니다.'
+      });
+      guidanceBox.createEl('div', {
+        text: '생성 모델 권장: MLX 속도 우선은 mlx-community/gemma-2-2b-it, 최신 Gemma 우선은 Ollama를 통한 gemma4:e4b',
+      });
+      guidanceBox.createEl('div', {
+        text: '임베딩 모델 권장: nomic-embed-text:latest',
+      });
+
+      if (currentGenerationLooksWrong || currentEmbeddingLooksWrong) {
+        const warningBox = containerEl.createDiv({ cls: 'setting-item-description' });
+        warningBox.style.marginBottom = '1rem';
+        warningBox.style.color = 'var(--text-warning)';
+        warningBox.setText('현재 모델 역할이 뒤바뀐 것으로 보입니다. 생성 모델은 Gemma 계열, 임베딩 모델은 nomic-embed-text 계열을 권장합니다.');
+      }
+
       const presetHelp = containerEl.createDiv({ cls: 'setting-item-description' });
       presetHelp.style.marginBottom = '1rem';
       presetHelp.setText(
         this.plugin.settings.ollamaGemmaPreset === 'gemma-fast'
-          ? '속도 우선 프리셋입니다. 생성 모델은 MLX 기반 추천값인 mlx-community/gemma-2-2b-it 으로 자동 설정됩니다.'
+          ? '현재 프리셋: Gemma 빠름. 생성 모델은 MLX 추천값인 mlx-community/gemma-2-2b-it 으로 맞춰집니다.'
           : this.plugin.settings.ollamaGemmaPreset === 'gemma-latest'
-            ? '최신 Gemma 우선 프리셋입니다. Ollama를 통한 gemma4:e4b 모델로 자동 설정됩니다.'
-            : '직접 선택 모드에서는 아래에서 생성 모델과 임베딩 모델을 수동으로 고를 수 있습니다.'
+            ? '현재 프리셋: Gemma 최신. 생성 모델은 Ollama를 통한 gemma4:e4b 로 맞춰집니다.'
+            : '현재 프리셋: 직접 선택. 생성 모델은 gemma 계열, 임베딩 모델은 nomic-embed-text 계열을 권장합니다.'
       );
-
-      const presetReference = containerEl.createDiv({ cls: 'setting-item-description' });
-      presetReference.style.marginBottom = '1rem';
-      presetReference.setText('추천 기준: 속도 우선은 mlx-community/gemma-2-2b-it, 최신 모델 우선은 Ollama를 통한 gemma4:e4b');
 
       // 모델 로드 상태 표시
       const statusDiv = containerEl.createDiv();
@@ -147,29 +169,29 @@ export class OSBASettingTab extends PluginSettingTab {
         statusText.style.color = '#ff6b6b';
       }
 
-      if (this.plugin.settings.showMacMlxGuidance) {
-        const mlxNotice = containerEl.createDiv({ cls: 'setting-item-description' });
-        mlxNotice.style.marginBottom = '1rem';
-        mlxNotice.setText(
-          isMac
-            ? 'Mac에서는 최신 Ollama와 Apple Silicon 환경을 사용하면 MLX 기반 최적화 경로를 활용할 수 있습니다. 이 플러그인은 실행 중인 Ollama 서버에 연결만 하며, MLX 실행 자체는 Ollama 앱/런타임이 담당합니다.'
-            : '이 안내는 Mac 사용자용입니다. MLX 실행 자체는 Ollama 앱/런타임이 담당하고, 플러그인은 실행 중인 Ollama 서버에 연결만 합니다.'
-        );
-      }
-
       if (availableModels.length > 0) {
         new Setting(containerEl)
           .setName('생성 모델')
           .setDesc(
             this.plugin.settings.ollamaGemmaPreset === 'manual'
-              ? '텍스트 생성에 사용할 로컬 모델'
+              ? '텍스트 생성에 사용할 로컬 모델 (권장: mlx-community/gemma-2-2b-it 또는 gemma4:e4b)'
               : '프리셋이 적용된 생성 모델입니다. 직접 선택으로 바꾸면 수동 변경할 수 있습니다.'
           )
           .addDropdown(dropdown => {
             dropdown.addOption('', '-- 모델 선택 --');
-            availableModels.forEach(model => {
+            const generationOptions = generationModels.length > 0 ? generationModels : availableModels;
+            generationOptions.forEach(model => {
               dropdown.addOption(model, model);
             });
+            if (
+              this.plugin.settings.ollamaGenerationModel &&
+              !generationOptions.includes(this.plugin.settings.ollamaGenerationModel)
+            ) {
+              dropdown.addOption(
+                this.plugin.settings.ollamaGenerationModel,
+                `${this.plugin.settings.ollamaGenerationModel} (현재 선택, 권장 아님)`
+              );
+            }
             dropdown.setValue(this.plugin.settings.ollamaGenerationModel || '');
             dropdown.onChange(async (value) => {
               this.plugin.settings.ollamaGenerationModel = value;
@@ -183,7 +205,7 @@ export class OSBASettingTab extends PluginSettingTab {
           .setName('생성 모델')
           .setDesc(
             this.plugin.settings.ollamaGemmaPreset === 'manual'
-              ? '텍스트 생성에 사용할 로컬 모델'
+              ? '텍스트 생성에 사용할 로컬 모델 (권장: mlx-community/gemma-2-2b-it 또는 gemma4:e4b)'
               : '프리셋이 적용된 생성 모델입니다. 직접 선택으로 바꾸면 수동 변경할 수 있습니다.'
           )
           .addText(text => text
@@ -199,12 +221,22 @@ export class OSBASettingTab extends PluginSettingTab {
       if (availableModels.length > 0) {
         new Setting(containerEl)
           .setName('임베딩 모델')
-          .setDesc('벡터 임베딩에 사용할 로컬 모델 (`nomic-embed-text` 권장)')
+          .setDesc('벡터 임베딩에 사용할 로컬 모델 (권장: nomic-embed-text:latest)')
           .addDropdown(dropdown => {
             dropdown.addOption('', '-- 모델 선택 --');
-            availableModels.forEach(model => {
+            const embeddingOptions = embeddingModels.length > 0 ? embeddingModels : availableModels;
+            embeddingOptions.forEach(model => {
               dropdown.addOption(model, model);
             });
+            if (
+              this.plugin.settings.ollamaEmbeddingModel &&
+              !embeddingOptions.includes(this.plugin.settings.ollamaEmbeddingModel)
+            ) {
+              dropdown.addOption(
+                this.plugin.settings.ollamaEmbeddingModel,
+                `${this.plugin.settings.ollamaEmbeddingModel} (현재 선택, 권장 아님)`
+              );
+            }
             dropdown.setValue(this.plugin.settings.ollamaEmbeddingModel || '');
             dropdown.onChange(async (value) => {
               this.plugin.settings.ollamaEmbeddingModel = value;
@@ -214,7 +246,7 @@ export class OSBASettingTab extends PluginSettingTab {
       } else {
         new Setting(containerEl)
           .setName('임베딩 모델')
-          .setDesc('벡터 임베딩에 사용할 로컬 모델 (`nomic-embed-text` 권장)')
+          .setDesc('벡터 임베딩에 사용할 로컬 모델 (권장: nomic-embed-text:latest)')
           .addText(text => text
             .setPlaceholder('예: nomic-embed-text')
             .setValue(this.plugin.settings.ollamaEmbeddingModel)
