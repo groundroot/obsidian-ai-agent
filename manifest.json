@@ -1,6 +1,6 @@
 {
   "id": "obsidian-second-brain-agent",
-  "name": "Second Brain Agent with Local LLM Version",
+  "name": "Second Brain Agent",
   "version": "0.3.1",
   "minAppVersion": "1.4.0",
   "description": "AI-powered Second Brain automation with Ollama local model support - auto-discover connections, analyze knowledge gaps, and enhance your notes with intelligent insights",

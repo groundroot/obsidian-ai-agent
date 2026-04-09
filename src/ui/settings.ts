@@ -21,7 +21,7 @@ export class OSBASettingTab extends PluginSettingTab {
     containerEl.empty();
     const isMac = /Mac|iPhone|iPad/i.test(window.navigator.platform) || /Mac OS X/i.test(window.navigator.userAgent);
 
-    containerEl.createEl('h1', { text: 'Second Brain Agent with Local LLM Version 설정' });
+    containerEl.createEl('h1', { text: 'Second Brain Agent 설정' });
 
     // ============================================
     // Ollama Settings Section
