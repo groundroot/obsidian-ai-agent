@@ -37,7 +37,7 @@ export class OSBAMainMenuModal extends Modal {
     contentEl.addClass('osba-modal');
     contentEl.addClass('osba-main-menu');
 
-    contentEl.createEl('h2', { text: '🧠 Second Brain Agent' });
+    contentEl.createEl('h2', { text: '🧠 Second Brain Agent with Local LLM Version' });
     contentEl.createEl('p', { text: '실행할 작업을 선택하세요', cls: 'osba-modal-desc' });
 
     const grid = contentEl.createDiv({ cls: 'osba-menu-grid' });

@@ -85,7 +85,7 @@ export default class OSBAPlugin extends Plugin {
     }, 5000);
 
     console.log('OSBA Plugin loaded successfully');
-    new Notice('Second Brain Agent loaded');
+    new Notice('Second Brain Agent with Local LLM Version loaded');
   }
 
   async onunload(): Promise<void> {
