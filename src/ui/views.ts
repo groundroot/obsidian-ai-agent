@@ -121,12 +121,8 @@ export class JobQueueView extends ItemView {
       .setButtonText('전체 인덱싱 시작')
       .setCta()
       .onClick(async () => {
-        // 인덱싱 시작 로직
-        if (this.plugin.embeddingService) {
-          const files = this.app.vault.getMarkdownFiles();
-          // 실제 구현에서는 BatchProgressModal을 사용
-          this.refresh();
-        }
+        await this.plugin.batchIndexVault();
+        await this.refresh();
       });
   }
 
@@ -166,7 +162,7 @@ export class JobQueueView extends ItemView {
     if (job.status === 'running' && job.progress !== undefined) {
       const progressContainer = info.createDiv({ cls: 'osba-progress-mini' });
       const progressBar = progressContainer.createDiv({ cls: 'osba-progress-bar-mini' });
-      progressBar.style.width = `${job.progress * 100}%`;
+      progressBar.style.width = `${job.progress}%`;
     }
 
     // 에러 메시지 (실패한 경우)
@@ -180,18 +176,34 @@ export class JobQueueView extends ItemView {
 
   private getJobTypeLabel(type: string): string {
     const labels: Record<string, string> = {
-      embedding: '📊 임베딩 생성',
+      embed: '📊 현재 노트 인덱싱',
       analysis: '🔍 연결 분석',
-      batch_embedding: '📦 배치 임베딩',
-      batch_analysis: '📦 배치 분석',
+      'batch-embed': '📦 전체 인덱싱',
+      'quick-draft': '✨ 빠른 초안',
+      'find-similar': '🔗 유사 노트 찾기',
+      'vault-scan': '📦 볼트 스캔',
     };
     return labels[type] || type;
   }
 
   private async getActiveJobs(): Promise<JobStatusInfo[]> {
-    // 실제 구현에서는 plugin에서 작업 큐를 관리
-    // 여기서는 더미 데이터 반환
-    return [];
+    return this.plugin.getJobs()
+      .slice()
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, 20)
+      .map(job => ({
+        id: job.id,
+        type: job.type,
+        status: job.status,
+        progress: job.progress,
+        notePath: typeof job.data?.path === 'string'
+          ? job.data.path
+          : typeof job.data?.notePath === 'string'
+            ? job.data.notePath
+            : undefined,
+        error: job.error,
+        createdAt: job.createdAt,
+      }));
   }
 }
 

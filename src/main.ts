@@ -494,9 +494,13 @@ Generate the markdown content for the note:`;
     file: TFile,
     options: { silent?: boolean; force?: boolean; reason?: string } = {}
   ): Promise<void> {
+    const job = this.createJob('embed', { path: file.path, reason: options.reason || '현재 노트 인덱싱' });
     try {
+      this.updateJobStatus(job.id, 'running');
+
       // Check if excluded
       if (this.isExcluded(file)) {
+        this.updateJobStatus(job.id, 'completed', { skipped: true, reason: 'excluded' });
         if (!options.silent) {
           new Notice('이 노트는 인덱싱 대상에서 제외되었습니다.');
         }
@@ -506,6 +510,7 @@ Generate the markdown content for the note:`;
       if (!options.force) {
         const status = await this.embeddingService.getIndexStatus(file);
         if (status.status === 'indexed') {
+          this.updateJobStatus(job.id, 'completed', { skipped: true, reason: 'indexed' });
           if (!options.silent) {
             new Notice('이미 최신 상태로 인덱싱되어 있습니다.');
           }
@@ -514,6 +519,7 @@ Generate the markdown content for the note:`;
       }
 
       const result = await this.embeddingService.processNote(file);
+      this.updateJobProgress(job.id, 100);
 
       if (result.success && result.noteId && result.contentHash && result.model) {
         await this.frontmatterManager.updateEmbeddingStatus(file, {
@@ -522,14 +528,18 @@ Generate the markdown content for the note:`;
           embeddingModel: result.model,
           indexStatus: 'indexed',
         });
+        this.updateJobStatus(job.id, 'completed', result);
 
         if (!options.silent) {
           const modeText = result.cached ? '캐시/기존 데이터로' : '새로';
           new Notice(`${options.reason || '노트'} 인덱싱 완료 (${modeText} 처리됨)`);
         }
+      } else {
+        this.updateJobStatus(job.id, 'failed', result, new Error('인덱싱에 실패했습니다.'));
       }
 
     } catch (error) {
+      this.updateJobStatus(job.id, 'failed', undefined, error as Error);
       console.error(`Failed to generate embedding for ${file.path}:`, error);
       if (!options.silent) {
         new Notice('인덱싱에 실패했습니다.');
@@ -594,13 +604,17 @@ Generate the markdown content for the note:`;
   }
 
   async findSimilarNotes(file: TFile): Promise<void> {
+    const job = this.createJob('find-similar', { path: file.path });
     try {
+      this.updateJobStatus(job.id, 'running');
       const indexReady = await this.ensureNoteIndexedForAction(file, '유사 노트 찾기');
       if (!indexReady) {
+        this.updateJobStatus(job.id, 'failed', undefined, new Error('현재 노트를 인덱싱할 수 없습니다.'));
         return;
       }
 
       const similar = await this.embeddingService.findSimilarNotes(file, 10);
+      this.updateJobProgress(job.id, 80);
 
       // Save to frontmatter
       const similarForFrontmatter = similar.map(n => ({
@@ -609,6 +623,8 @@ Generate the markdown content for the note:`;
         similarity: n.similarity
       }));
       await this.frontmatterManager.updateSimilarNotes(file, similarForFrontmatter);
+      this.updateJobProgress(job.id, 100);
+      this.updateJobStatus(job.id, 'completed', { count: similar.length, notePath: file.path });
 
       // Display results in a modal or notice
       if (similar.length === 0) {
@@ -621,6 +637,7 @@ Generate the markdown content for the note:`;
       }
 
     } catch (error) {
+      this.updateJobStatus(job.id, 'failed', undefined, error as Error);
       console.error('Failed to find similar notes:', error);
       new Notice('Failed to find similar notes');
     }
@@ -853,6 +870,24 @@ Generate the markdown content for the note:`;
 
   getJobs(): Job[] {
     return Array.from(this.jobQueue.values());
+  }
+
+  startTrackedJob(type: Job['type'], data: Record<string, unknown>): Job {
+    const job = this.createJob(type, data);
+    this.updateJobStatus(job.id, 'running');
+    return job;
+  }
+
+  setTrackedJobProgress(id: string, progress: number): void {
+    this.updateJobProgress(id, progress);
+  }
+
+  completeTrackedJob(id: string, result?: unknown): void {
+    this.updateJobStatus(id, 'completed', result);
+  }
+
+  failTrackedJob(id: string, error: Error, result?: unknown): void {
+    this.updateJobStatus(id, 'failed', result, error);
   }
 
   // ============================================

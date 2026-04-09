@@ -257,7 +257,7 @@ export interface OSBAFrontmatter {
 // ============================================
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type JobType = 'quick-draft' | 'analyze' | 'embed' | 'batch-embed' | 'vault-scan';
+export type JobType = 'quick-draft' | 'analyze' | 'embed' | 'batch-embed' | 'vault-scan' | 'find-similar';
 
 export interface Job {
   id: string;

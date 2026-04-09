@@ -206,18 +206,25 @@ export class QuickDraftModal extends Modal {
     this.isProcessing = true;
     this.resultContainer.empty();
     this.resultContainer.createEl('p', { text: '생성 중...', cls: 'osba-loading' });
+    let jobId: string | null = null;
 
     try {
+      const job = this.plugin.startTrackedJob('quick-draft', { prompt });
+      jobId = job.id;
       const activeFile = this.app.workspace.getActiveFile();
       if (activeFile && activeFile.extension === 'md') {
         const ready = await this.plugin.ensureNoteIndexedForAction(activeFile, '빠른 초안');
         if (!ready) {
+          this.plugin.failTrackedJob(job.id, new Error('현재 노트를 인덱싱할 수 없습니다.'));
           this.resultContainer.empty();
           return;
         }
       }
 
+      this.plugin.setTrackedJobProgress(job.id, 30);
       const result = await this.plugin.connectionAnalyzer.generateQuickDraft(prompt);
+      this.plugin.setTrackedJobProgress(job.id, 100);
+      this.plugin.completeTrackedJob(job.id, { cost: result.cost, relatedNotes: result.relatedNotes.length });
 
       this.resultContainer.empty();
 
@@ -277,11 +284,16 @@ export class QuickDraftModal extends Modal {
         });
 
     } catch (error) {
+      // quick draft job failure is tracked here to keep modal flow and queue in sync
+      const message = error instanceof Error ? error : new Error('알 수 없는 오류');
       this.resultContainer.empty();
       this.resultContainer.createEl('p', {
-        text: `오류: ${error instanceof Error ? error.message : '알 수 없는 오류'}`,
+        text: `오류: ${message.message}`,
         cls: 'osba-error',
       });
+      if (jobId) {
+        this.plugin.failTrackedJob(jobId, message);
+      }
     } finally {
       this.isProcessing = false;
     }
