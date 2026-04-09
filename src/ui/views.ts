@@ -377,7 +377,7 @@ export class CostDashboardView extends ItemView {
     const section = this.contentContainer.createDiv({ cls: 'osba-provider-section' });
     section.createEl('h5', { text: '🏢 제공자별 통계' });
 
-    const providers = ['gemini', 'claude', 'openai'] as const;
+    const providers = ['gemini', 'claude', 'openai', 'xai', 'ollama'] as const;
     const grid = section.createDiv({ cls: 'osba-provider-grid' });
 
     for (const provider of providers) {
@@ -444,6 +444,8 @@ export class CostDashboardView extends ItemView {
       gemini: '✨',
       claude: '🤖',
       openai: '🧠',
+      xai: '🚀',
+      ollama: '🦙',
     };
     return icons[provider] || '📦';
   }

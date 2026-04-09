@@ -75,7 +75,7 @@ CREATE INDEX IF NOT EXISTS idx_gaps_priority ON knowledge_gaps(priority);
 CREATE TABLE IF NOT EXISTS usage_log (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-  provider TEXT NOT NULL CHECK(provider IN ('gemini', 'claude', 'openai', 'xai')),
+  provider TEXT NOT NULL CHECK(provider IN ('gemini', 'claude', 'openai', 'xai', 'ollama')),
   model TEXT NOT NULL,
   operation TEXT NOT NULL CHECK(operation IN ('generation', 'embedding', 'analysis', 'draft', 'indexing')),
   input_tokens INTEGER DEFAULT 0,
@@ -243,8 +243,8 @@ export class OSBADatabase {
       ? versionResult[0].values[0][0] as number
       : 0;
 
-    if (version < 1) {
-      console.log('Migrating database to version 1...');
+    if (version < 2) {
+      console.log('Migrating database to version 2...');
 
       try {
         db.run('BEGIN TRANSACTION');
@@ -257,7 +257,7 @@ export class OSBADatabase {
           CREATE TABLE usage_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-            provider TEXT NOT NULL CHECK(provider IN ('gemini', 'claude', 'openai', 'xai')),
+            provider TEXT NOT NULL CHECK(provider IN ('gemini', 'claude', 'openai', 'xai', 'ollama')),
             model TEXT NOT NULL,
             operation TEXT NOT NULL CHECK(operation IN ('generation', 'embedding', 'analysis', 'draft', 'indexing')),
             input_tokens INTEGER DEFAULT 0,
@@ -279,11 +279,11 @@ export class OSBADatabase {
         db.run('DROP TABLE usage_log_old');
 
         // Update version
-        db.run('PRAGMA user_version = 1');
+        db.run('PRAGMA user_version = 2');
 
         db.run('COMMIT');
 
-        console.log('Database migration to version 1 completed');
+        console.log('Database migration to version 2 completed');
       } catch (error) {
         db.run('ROLLBACK');
         console.error('Migration failed:', error);
