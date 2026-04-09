@@ -1,7 +1,7 @@
 {
   "name": "obsidian-second-brain-agent",
-  "version": "0.2.15",
-  "description": "AI-powered Second Brain automation for Obsidian",
+  "version": "0.3.0",
+  "description": "AI-powered Second Brain automation with Ollama local model support for Obsidian",
   "main": "main.js",
   "scripts": {
     "dev": "node esbuild.config.mjs",

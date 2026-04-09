@@ -2,6 +2,31 @@
 
 All notable changes to OSBA (Obsidian Second Brain Agent) will be documented in this file.
 
+## [0.3.0] - 2026-04-09
+
+### Added
+- **Ollama Local Model Support**: Complete integration of Ollama for free local AI models
+  - Auto-discover installed Ollama models via `/api/tags`
+  - Support for Generation models (Llama, Gemma, Mistral, etc.)
+  - Support for Embedding models (nomic-embed-text recommended)
+  - Configurable Ollama Base URL with connection testing
+  - Zero-cost AI operations with Ollama
+- **Dynamic Settings UI**: Real-time model loading with async display
+  - Model selection dropdowns auto-populated from installed models
+  - Connection status indicator (🔄 loading, ✅ found, ⚠️ none, ❌ error)
+  - Text input fallback when no models available
+
+### Changed
+- Updated `src/types/index.ts`: Added `'ollama'` to ProviderType union
+- Updated `src/api/provider.ts`: Added Ollama routing in generateText() and generateEmbedding()
+- Updated `src/ui/settings.ts`: Made display() async for dynamic model loading
+
+### Technical Details
+- Ollama uses OpenAI-compatible API endpoints (`/v1/chat/completions`, `/v1/embeddings`)
+- Cost tracking: Ollama models return 0 cost (vs paid APIs)
+- Backward compatible: Existing API keys (OpenAI, Gemini, Claude) continue to work
+- Hybrid mode: Can mix Ollama + cloud APIs (e.g., Generation: Ollama, Embedding: OpenAI)
+
 ## [0.2.3] - 2025-12-20
 
 ### Fixed
