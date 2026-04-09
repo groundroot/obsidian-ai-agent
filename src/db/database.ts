@@ -465,6 +465,9 @@ export class OSBADatabase {
 
     for (const row of result[0].values) {
       const storedEmbedding = blobToEmbedding(row[1] as Uint8Array);
+      if (storedEmbedding.length !== embedding.length) {
+        continue;
+      }
       const similarity = cosineSimilarity(embedding, storedEmbedding);
 
       similarities.push({
@@ -494,6 +497,23 @@ export class OSBADatabase {
     if (result.length === 0 || result[0].values.length === 0) return null;
 
     return blobToEmbedding(result[0].values[0][0] as Uint8Array);
+  }
+
+  async getCachedEmbeddingEntry(
+    contentHash: string
+  ): Promise<{ embedding: number[]; model: string } | null> {
+    const db = this.ensureDb();
+    const result = db.exec(
+      'SELECT embedding, model FROM embedding_cache WHERE content_hash = ?',
+      [contentHash]
+    );
+
+    if (result.length === 0 || result[0].values.length === 0) return null;
+
+    return {
+      embedding: blobToEmbedding(result[0].values[0][0] as Uint8Array),
+      model: result[0].values[0][1] as string,
+    };
   }
 
   async cacheEmbedding(contentHash: string, embedding: number[], model: string): Promise<void> {

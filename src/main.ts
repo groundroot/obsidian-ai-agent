@@ -325,6 +325,7 @@ export default class OSBAPlugin extends Plugin {
         return false;
       },
     });
+
   }
 
   // ============================================
@@ -777,9 +778,9 @@ Generate the markdown content for the note:`;
     }
   }
 
-  async batchAnalyzeVault(): Promise<void> {
+  async batchAnalyzeVault(forceReanalyze: boolean = false): Promise<void> {
     const job = this.createJob('batch-analyze', {});
-    const modal = new ProgressModal(this.app, '전체 연결분석');
+    const modal = new ProgressModal(this.app, forceReanalyze ? '강제 전체 연결분석' : '전체 연결분석');
     modal.open();
     modal.updateState({ message: '분석 준비 중...', progress: 0 });
 
@@ -791,6 +792,11 @@ Generate the markdown content for the note:`;
       const files: TFile[] = [];
 
       for (const file of allFiles) {
+        if (forceReanalyze) {
+          files.push(file);
+          continue;
+        }
+
         const currentHash = await this.embeddingService.getContentHash(file);
         const isCurrent = await this.frontmatterManager.isAnalysisCurrent(file, currentHash);
         if (!isCurrent) {
@@ -811,7 +817,7 @@ Generate the markdown content for the note:`;
       }
 
       modal.updateState({
-        message: `총 ${total}개 노트 연결분석 시작`,
+        message: `총 ${total}개 노트 ${forceReanalyze ? '강제 연결분석' : '연결분석'} 시작`,
         subMessage: '잠시만 기다려주세요...'
       });
 
@@ -825,8 +831,8 @@ Generate the markdown content for the note:`;
         const analyzed = await this.runNoteAnalysis(file, {
           showFeedback: false,
           useModal: false,
-          skipIfCurrent: true,
-          reason: '전체 연결분석',
+          skipIfCurrent: !forceReanalyze,
+          reason: forceReanalyze ? '강제 전체 연결분석' : '전체 연결분석',
         });
 
         if (analyzed) {
@@ -839,9 +845,9 @@ Generate the markdown content for the note:`;
       }
 
       this.updateJobStatus(job.id, 'completed', { processed, skipped });
-      modal.complete(`✅ ${processed}개 노트 연결분석 완료!`);
+      modal.complete(`✅ ${processed}개 노트 ${forceReanalyze ? '강제 연결분석' : '연결분석'} 완료!`);
       setTimeout(() => modal.close(), 2000);
-      new Notice(`${processed}개 노트를 연결분석했습니다.`);
+      new Notice(`${processed}개 노트를 ${forceReanalyze ? '강제 연결분석' : '연결분석'}했습니다.`);
     } catch (error) {
       this.updateJobStatus(job.id, 'failed', undefined, error as Error);
       modal.setError(error instanceof Error ? error.message : 'Batch analysis failed');

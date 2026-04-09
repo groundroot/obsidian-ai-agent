@@ -96,9 +96,19 @@ export class OSBAMainMenuModal extends Modal {
       this.plugin.batchIndexVault();
     });
 
+    this.createMenuButton(subGrid, '🔥', '강제 전체 인덱싱', '', 'secondary', () => {
+      this.close();
+      this.plugin.batchIndexVault(true);
+    });
+
     this.createMenuButton(subGrid, '🧠', '전체 연결분석', '', 'secondary', () => {
       this.close();
       this.plugin.batchAnalyzeVault();
+    });
+
+    this.createMenuButton(subGrid, '🚨', '강제 전체 분석', '', 'secondary', () => {
+      this.close();
+      this.plugin.batchAnalyzeVault(true);
     });
 
     // 6. Cost Dashboard

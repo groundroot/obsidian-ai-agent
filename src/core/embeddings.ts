@@ -55,6 +55,12 @@ export class EmbeddingService {
     this.settings = settings;
   }
 
+  private getCurrentEmbeddingModel(): string {
+    return this.settings.useOllama
+      ? this.settings.ollamaEmbeddingModel
+      : this.settings.embeddingModel;
+  }
+
   // ============================================
   // Note Processing
   // ============================================
@@ -103,38 +109,41 @@ export class EmbeddingService {
       // 콘텐츠 해시 계산
       const contentHash = this.computeHash(content);
       const existingNote = await this.database.getNoteByPath(path);
+      const currentModel = this.getCurrentEmbeddingModel();
 
       if (existingNote?.embeddingId && existingNote.contentHash === contentHash) {
+        const cache = this.metadataCache.getFileCache(file);
+        const frontmatterEmbeddingModel = cache?.frontmatter?.osba?.embeddingModel;
+        if (frontmatterEmbeddingModel && frontmatterEmbeddingModel !== currentModel) {
+          // fall through and rebuild with the currently selected embedding model
+        } else {
         return {
           success: true,
           cached: true,
           cost: 0,
           noteId: existingNote.id,
-          model: this.settings.useOllama
-            ? this.settings.ollamaEmbeddingModel
-            : this.settings.embeddingModel,
+          model: currentModel,
           contentHash,
         };
+        }
       }
 
       // 캐시 확인
-      const cachedEmbedding = await this.database.getCachedEmbedding(contentHash);
-      if (cachedEmbedding) {
+      const cachedEmbeddingEntry = await this.database.getCachedEmbeddingEntry(contentHash);
+      if (cachedEmbeddingEntry && cachedEmbeddingEntry.model === currentModel) {
         // 캐시된 임베딩 사용
         const noteId = await this.database.upsertNote(
           path,
           file.basename,
           content
         );
-        await this.database.storeEmbedding(noteId, cachedEmbedding);
+        await this.database.storeEmbedding(noteId, cachedEmbeddingEntry.embedding);
         return {
           success: true,
           cached: true,
           cost: 0,
           noteId,
-          model: this.settings.useOllama
-            ? this.settings.ollamaEmbeddingModel
-            : this.settings.embeddingModel,
+          model: currentModel,
           contentHash,
         };
       }
@@ -255,7 +264,10 @@ export class EmbeddingService {
     const contentHash = this.computeHash(content);
 
     // 기존 임베딩 확인
-    let embedding = await this.database.getCachedEmbedding(contentHash);
+    const cachedEmbeddingEntry = await this.database.getCachedEmbeddingEntry(contentHash);
+    let embedding = cachedEmbeddingEntry?.model === this.getCurrentEmbeddingModel()
+      ? cachedEmbeddingEntry.embedding
+      : null;
 
     if (!embedding) {
       // 새로 생성
@@ -290,6 +302,9 @@ export class EmbeddingService {
     const content = this.normalizeIndexableContent(rawContent);
     const contentHash = this.computeHash(content);
     const note = await this.database.getNoteByPath(file.path);
+    const currentModel = this.getCurrentEmbeddingModel();
+    const cache = this.metadataCache.getFileCache(file);
+    const frontmatterEmbeddingModel = cache?.frontmatter?.osba?.embeddingModel;
 
     if (!note || !note.embeddingId) {
       return {
@@ -300,6 +315,15 @@ export class EmbeddingService {
     }
 
     if (note.contentHash !== contentHash) {
+      return {
+        status: 'stale',
+        contentHash,
+        noteId: note.id,
+        embeddingId: note.embeddingId,
+      };
+    }
+
+    if (frontmatterEmbeddingModel && frontmatterEmbeddingModel !== currentModel) {
       return {
         status: 'stale',
         contentHash,

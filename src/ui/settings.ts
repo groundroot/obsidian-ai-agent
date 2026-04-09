@@ -697,6 +697,20 @@ export class OSBASettingTab extends PluginSettingTab {
         }));
 
     new Setting(containerEl)
+      .setName('강제 전체 인덱싱')
+      .setDesc('이미 인덱싱된 노트까지 포함해 전체 노트를 다시 인덱싱합니다')
+      .addButton(button => button
+        .setButtonText('강제 인덱싱')
+        .setWarning()
+        .onClick(async () => {
+          try {
+            await this.plugin.batchIndexVault(true);
+          } catch (error) {
+            new Notice(error instanceof Error ? error.message : '강제 인덱싱 실패');
+          }
+        }));
+
+    new Setting(containerEl)
       .setName('전체 연결분석')
       .setDesc('볼트 전체를 순회하며 각 노트의 연결분석을 순차적으로 실행합니다')
       .addButton(button => button
@@ -706,6 +720,20 @@ export class OSBASettingTab extends PluginSettingTab {
             await this.plugin.batchAnalyzeVault();
           } catch (error) {
             new Notice(error instanceof Error ? error.message : '전체 연결분석 실패');
+          }
+        }));
+
+    new Setting(containerEl)
+      .setName('강제 전체 연결분석')
+      .setDesc('이미 분석된 노트까지 포함해 전체 노트를 다시 연결분석합니다')
+      .addButton(button => button
+        .setButtonText('강제 분석')
+        .setWarning()
+        .onClick(async () => {
+          try {
+            await this.plugin.batchAnalyzeVault(true);
+          } catch (error) {
+            new Notice(error instanceof Error ? error.message : '강제 전체 연결분석 실패');
           }
         }));
 
