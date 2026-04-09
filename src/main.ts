@@ -113,7 +113,8 @@ export default class OSBAPlugin extends Plugin {
   private async initializeServices(): Promise<void> {
     try {
       // Initialize database with Obsidian file adapter
-      const dbPath = `${this.app.vault.configDir}/plugins/obsidian-second-brain-agent/osba.db`;
+      const pluginDataDir = `${this.app.vault.configDir}/plugins/${this.manifest.id}`;
+      const dbPath = `${pluginDataDir}/osba.db`;
       this.database = new Database(dbPath);
 
       // Set up persistence callbacks for sql.js database
@@ -122,7 +123,7 @@ export default class OSBAPlugin extends Plugin {
       this.database.setSaveCallback(async (data: Uint8Array) => {
         try {
           // Ensure directory exists
-          const dirPath = `${this.app.vault.configDir}/plugins/obsidian-second-brain-agent`;
+          const dirPath = pluginDataDir;
           if (!(await adapter.exists(dirPath))) {
             await adapter.mkdir(dirPath);
           }
