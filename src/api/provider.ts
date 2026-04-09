@@ -608,39 +608,45 @@ export class AIProviderManager {
     prompt: string,
     options: GenerateOptions
   ): Promise<GenerateResult> {
-    const url = `${this.settings.ollamaBaseUrl}/v1/chat/completions`;
-
-    const body = {
+    const openAICompatBody: Record<string, unknown> = {
       model: this.settings.ollamaGenerationModel,
-      messages: [{
-        role: 'user',
-        content: prompt
-      }],
+      messages: this.buildChatMessages(prompt, options.systemPrompt),
       temperature: options.temperature ?? 0.7,
       top_p: options.topP ?? 0.95,
       max_tokens: options.maxTokens || 2048,
     };
 
-    const response = await this.makeRequest({
-      url,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }, 'ollama');
+    if (options.stopSequences && options.stopSequences.length > 0) {
+      openAICompatBody.stop = options.stopSequences;
+    }
 
-    const data = JSON.parse(response);
+    const data = await this.makeOllamaRequest(
+      [
+        {
+          path: '/v1/chat/completions',
+          body: openAICompatBody,
+        },
+        {
+          path: '/api/chat',
+          body: {
+            model: this.settings.ollamaGenerationModel,
+            messages: this.buildChatMessages(prompt, options.systemPrompt),
+            stream: false,
+            options: this.buildOllamaOptions(options),
+          },
+        },
+      ]
+    );
 
-    if (!data.choices || data.choices.length === 0) {
+    const text = data.choices?.[0]?.message?.content || data.message?.content || '';
+
+    if (!text) {
       throw new APIError('No response from Ollama', 'ollama', 500);
     }
 
-    const choice = data.choices[0];
-    const text = choice.message?.content || '';
-
-    const inputTokens = data.usage?.prompt_tokens || this.estimateTokens(prompt);
-    const outputTokens = data.usage?.completion_tokens || this.estimateTokens(text);
+    const inputTokens = data.usage?.prompt_tokens ?? data.prompt_eval_count ?? this.estimateTokens(prompt);
+    const outputTokens = data.usage?.completion_tokens ?? data.eval_count ?? this.estimateTokens(text);
+    const finishReason = data.choices?.[0]?.finish_reason || data.done_reason;
 
     return {
       text,
@@ -648,38 +654,47 @@ export class AIProviderManager {
       outputTokens,
       cost: 0,  // Ollama is free (local)
       model: this.settings.ollamaGenerationModel,
-      finishReason: choice.finish_reason === 'stop' ? 'stop' : 'length',
+      finishReason: finishReason === 'stop' ? 'stop' : 'length',
     };
   }
 
   private async generateEmbeddingWithOllama(text: string): Promise<EmbeddingResult> {
-    const url = `${this.settings.ollamaBaseUrl}/v1/embeddings`;
-
     // Truncate text if too long
     const truncatedText = text.length > 8000 * 4 ? text.slice(0, 8000 * 4) : text;
 
-    const body = {
-      model: this.settings.ollamaEmbeddingModel,
-      input: truncatedText,
-    };
+    const data = await this.makeOllamaRequest(
+      [
+        {
+          path: '/v1/embeddings',
+          body: {
+            model: this.settings.ollamaEmbeddingModel,
+            input: truncatedText,
+          },
+        },
+        {
+          path: '/api/embed',
+          body: {
+            model: this.settings.ollamaEmbeddingModel,
+            input: truncatedText,
+          },
+        },
+        {
+          path: '/api/embeddings',
+          body: {
+            model: this.settings.ollamaEmbeddingModel,
+            prompt: truncatedText,
+          },
+        },
+      ]
+    );
 
-    const response = await this.makeRequest({
-      url,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    }, 'ollama');
+    const embedding = data.data?.[0]?.embedding || data.embeddings?.[0] || data.embedding;
 
-    const data = JSON.parse(response);
-
-    if (!data.data || data.data.length === 0) {
+    if (!embedding || embedding.length === 0) {
       throw new APIError('No embedding returned from Ollama', 'ollama', 500);
     }
 
-    const embedding = data.data[0].embedding;
-    const inputTokens = data.usage?.total_tokens || this.estimateTokens(truncatedText);
+    const inputTokens = data.usage?.total_tokens ?? data.prompt_eval_count ?? this.estimateTokens(truncatedText);
 
     return {
       embedding,
@@ -691,7 +706,7 @@ export class AIProviderManager {
   }
 
   async listOllamaModels(): Promise<string[]> {
-    if (!this.settings.useOllama || !this.settings.ollamaBaseUrl) {
+    if (!this.settings.ollamaBaseUrl) {
       return [];
     }
 
@@ -707,6 +722,63 @@ export class AIProviderManager {
       console.error('Failed to list Ollama models:', error);
       return [];
     }
+  }
+
+  private async makeOllamaRequest(
+    attempts: Array<{ path: string; body?: Record<string, unknown>; method?: 'GET' | 'POST' }>
+  ): Promise<any> {
+    let lastError: Error | null = null;
+
+    for (const attempt of attempts) {
+      try {
+        const response = await this.makeRequest({
+          url: `${this.normalizeBaseUrl(this.settings.ollamaBaseUrl)}${attempt.path}`,
+          method: attempt.method || 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: attempt.body ? JSON.stringify(attempt.body) : undefined,
+        }, 'ollama');
+
+        return JSON.parse(response);
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+      }
+    }
+
+    throw lastError || new APIError('Failed to communicate with Ollama', 'ollama', 500);
+  }
+
+  private buildChatMessages(
+    prompt: string,
+    systemPrompt?: string
+  ): Array<{ role: 'system' | 'user'; content: string }> {
+    const messages: Array<{ role: 'system' | 'user'; content: string }> = [];
+
+    if (systemPrompt) {
+      messages.push({ role: 'system', content: systemPrompt });
+    }
+
+    messages.push({ role: 'user', content: prompt });
+    return messages;
+  }
+
+  private buildOllamaOptions(options: GenerateOptions): Record<string, unknown> {
+    const ollamaOptions: Record<string, unknown> = {
+      temperature: options.temperature ?? 0.7,
+      top_p: options.topP ?? 0.95,
+      num_predict: options.maxTokens || 2048,
+    };
+
+    if (options.stopSequences && options.stopSequences.length > 0) {
+      ollamaOptions.stop = options.stopSequences;
+    }
+
+    return ollamaOptions;
+  }
+
+  private normalizeBaseUrl(url: string): string {
+    return url.replace(/\/+$/, '');
   }
 
   // ============================================

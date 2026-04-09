@@ -153,7 +153,8 @@ OSBA: [기존 노트들을 참고해서...]
 2단계: OSBA 추가
 ├── 설정 → BRAT
 ├── "Add Beta plugin" 클릭
-├── 입력: reallygood83/obsidian-ai-agent
+├── 입력: 내 GitHub 포크 저장소 URL
+│   예: https://github.com/YOUR_GITHUB_ID/obsidian-ai-agent
 └── 완료!
 
 3단계: 활성화
@@ -181,12 +182,15 @@ OSBA: [기존 노트들을 참고해서...]
 
 | 서비스 | 용도 | 필수? | 발급처 |
 |--------|------|-------|--------|
-| OpenAI | 노트를 숫자로 바꿈 (임베딩) | **필수** | [platform.openai.com](https://platform.openai.com) |
+| OpenAI | 클라우드 임베딩 / OpenAI 모델 사용 | 선택 | [platform.openai.com](https://platform.openai.com) |
 | Gemini | 빠른 초안 작성 | 선택 | [aistudio.google.com](https://aistudio.google.com) |
 | Claude | 깊은 분석 | 선택 | [console.anthropic.com](https://console.anthropic.com) |
 | xAI Grok | 초안/분석 (128K 컨텍스트) | 선택 | [console.x.ai](https://console.x.ai) |
+| Ollama | 로컬 생성 / 로컬 임베딩 | 선택 | [ollama.com](https://ollama.com) |
 
-**최소 구성**: OpenAI API 키만 있으면 기본 기능 사용 가능!
+**최소 구성**
+- 클라우드만 사용할 때: OpenAI API 키만 있으면 기본 기능 사용 가능
+- 로컬만 사용할 때: Ollama 설치 + 생성 모델 + 임베딩 모델 설정만으로 사용 가능
 
 ### Step 2: API 키 입력
 
@@ -196,6 +200,24 @@ OSBA: [기존 노트들을 참고해서...]
 3. 각 키 옆 "테스트" 버튼 클릭
 4. "✅ 연결 성공!" 확인
 ```
+
+### Step 2-1: Ollama 로컬 모델 설정
+
+```
+1. Ollama 설치
+2. 터미널에서 모델 다운로드
+   예: ollama pull llama3.1:8b
+   예: ollama pull nomic-embed-text
+3. Obsidian → 설정 → Second Brain Agent
+4. 🦙 Ollama 사용 켜기
+5. Base URL 확인 (기본값: http://localhost:11434)
+6. Generation Model / Embedding Model 선택
+7. "연결 테스트"로 확인
+```
+
+**추천 조합**
+- 생성: `llama3.1:8b`, `qwen2.5:7b`, `gemma3:4b`
+- 임베딩: `nomic-embed-text`
 
 ### Step 3: 인덱싱 모드 선택 (NEW!)
 

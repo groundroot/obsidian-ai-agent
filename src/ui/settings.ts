@@ -30,7 +30,7 @@ export class OSBASettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('Ollama 사용')
-      .setDesc('로컬 Ollama 모델 사용 여부')
+      .setDesc('활성화하면 선택한 Ollama 모델을 텍스트 생성과 임베딩에 우선 사용합니다')
       .addToggle(toggle => toggle
         .setValue(this.plugin.settings.useOllama)
         .onChange(async (value) => {
@@ -196,7 +196,7 @@ export class OSBASettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('OpenAI API Key')
-      .setDesc('OpenAI Platform에서 발급받은 API 키 (임베딩용)')
+      .setDesc('OpenAI Platform에서 발급받은 API 키 (OpenAI 모델/클라우드 임베딩용, Ollama만 쓸 때는 선택)')
       .addText(text => text
         .setPlaceholder('Enter OpenAI API key')
         .setValue(this.plugin.settings.openaiApiKey)

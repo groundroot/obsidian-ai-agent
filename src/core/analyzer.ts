@@ -399,13 +399,18 @@ ${this.truncateContent(note.content, 2000)}
     notePath?: string
   ): Promise<void> {
     // 모델명에서 provider 추출
-    let provider: 'gemini' | 'claude' | 'openai' | 'xai' = 'gemini';
+    let provider: 'gemini' | 'claude' | 'openai' | 'xai' | 'ollama' = 'gemini';
     if (result.model.includes('claude')) {
       provider = 'claude';
     } else if (result.model.includes('gpt') || result.model.includes('embedding')) {
       provider = 'openai';
     } else if (result.model.includes('grok')) {
       provider = 'xai';
+    } else if (
+      result.cost === 0 &&
+      (this.settings.useOllama || result.model.includes('llama') || result.model.includes('gemma') || result.model.includes('nomic'))
+    ) {
+      provider = 'ollama';
     }
 
     await this.database.logUsage({

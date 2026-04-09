@@ -2,6 +2,16 @@
 
 All notable changes to OSBA (Obsidian Second Brain Agent) will be documented in this file.
 
+## [0.3.1] - 2026-04-09
+
+### Fixed
+- **Ollama API Compatibility**: Added fallback support for both OpenAI-compatible (`/v1/...`) and native Ollama (`/api/...`) endpoints
+  - Text generation now works with `/v1/chat/completions` and falls back to `/api/chat`
+  - Embeddings now work with `/v1/embeddings`, `/api/embed`, and legacy `/api/embeddings`
+  - System prompts and stop sequences are now passed through to Ollama requests
+- **Usage Tracking**: Added full `ollama` provider support to DB schema, migration, and provider usage detection
+- **Dashboard Visibility**: Added Ollama and xAI to provider statistics icons and summaries
+
 ## [0.3.0] - 2026-04-09
 
 ### Added
