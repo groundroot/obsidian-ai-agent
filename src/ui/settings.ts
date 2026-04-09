@@ -19,6 +19,7 @@ export class OSBASettingTab extends PluginSettingTab {
   async display(): Promise<void> {
     const { containerEl } = this;
     containerEl.empty();
+    const isMac = /Mac|iPhone|iPad/i.test(window.navigator.platform) || /Mac OS X/i.test(window.navigator.userAgent);
 
     containerEl.createEl('h1', { text: 'Second Brain Agent 설정' });
 
@@ -40,6 +41,19 @@ export class OSBASettingTab extends PluginSettingTab {
         }));
 
     if (this.plugin.settings.useOllama) {
+      const availableModels = await this.plugin.providerManager.listOllamaModels();
+      const applyGemmaPreset = async (preset: 'manual' | 'gemma-fast' | 'gemma-latest') => {
+        this.plugin.settings.ollamaGemmaPreset = preset;
+
+        if (preset === 'gemma-fast') {
+          this.plugin.settings.ollamaGenerationModel = 'mlx-community/gemma-2-2b-it';
+        } else if (preset === 'gemma-latest') {
+          this.plugin.settings.ollamaGenerationModel = 'gemma4:e4b';
+        }
+
+        await this.plugin.saveSettings();
+      };
+
       // Ollama URL 설정
       new Setting(containerEl)
         .setName('Ollama Base URL')
@@ -64,6 +78,48 @@ export class OSBASettingTab extends PluginSettingTab {
             }
           }));
 
+      new Setting(containerEl)
+        .setName('Mac용 MLX 안내')
+        .setDesc(
+          isMac
+            ? 'Apple Silicon Mac에서는 최신 Ollama의 MLX 기반 실행 경로를 권장합니다. 이 토글은 안내/추천용이며 실행 엔진을 직접 바꾸지는 않습니다.'
+            : 'Mac 사용자용 MLX 안내를 표시합니다. 실제 실행 엔진을 플러그인이 직접 제어하지는 않습니다.'
+        )
+        .addToggle(toggle => toggle
+          .setValue(this.plugin.settings.showMacMlxGuidance)
+          .onChange(async (value) => {
+            this.plugin.settings.showMacMlxGuidance = value;
+            await this.plugin.saveSettings();
+            this.display();
+          }));
+
+      new Setting(containerEl)
+        .setName('Gemma 프리셋')
+        .setDesc('Mac에서는 Gemma 계열을 빠르게 추천 설정으로 적용할 수 있습니다')
+        .addDropdown(dropdown => dropdown
+          .addOption('manual', '직접 선택')
+          .addOption('gemma-fast', 'Gemma 빠름 - mlx-community/gemma-2-2b-it')
+          .addOption('gemma-latest', 'Gemma 최신 - gemma4:e4b')
+          .setValue(this.plugin.settings.ollamaGemmaPreset)
+          .onChange(async (value) => {
+            await applyGemmaPreset(value as 'manual' | 'gemma-fast' | 'gemma-latest');
+            this.display();
+          }));
+
+      const presetHelp = containerEl.createDiv({ cls: 'setting-item-description' });
+      presetHelp.style.marginBottom = '1rem';
+      presetHelp.setText(
+        this.plugin.settings.ollamaGemmaPreset === 'gemma-fast'
+          ? '속도 우선 프리셋입니다. 생성 모델은 MLX 기반 추천값인 mlx-community/gemma-2-2b-it 으로 자동 설정됩니다.'
+          : this.plugin.settings.ollamaGemmaPreset === 'gemma-latest'
+            ? '최신 Gemma 우선 프리셋입니다. Ollama를 통한 gemma4:e4b 모델로 자동 설정됩니다.'
+            : '직접 선택 모드에서는 아래에서 생성 모델과 임베딩 모델을 수동으로 고를 수 있습니다.'
+      );
+
+      const presetReference = containerEl.createDiv({ cls: 'setting-item-description' });
+      presetReference.style.marginBottom = '1rem';
+      presetReference.setText('추천 기준: 속도 우선은 mlx-community/gemma-2-2b-it, 최신 모델 우선은 Ollama를 통한 gemma4:e4b');
+
       // 모델 로드 상태 표시
       const statusDiv = containerEl.createDiv();
       statusDiv.style.marginBottom = '1rem';
@@ -77,7 +133,7 @@ export class OSBASettingTab extends PluginSettingTab {
 
       try {
         statusText.innerHTML = '🔄 Ollama 모델 로드 중...';
-        const models = await this.plugin.providerManager.listOllamaModels();
+        const models = availableModels;
 
         if (models.length === 0) {
           statusText.innerHTML = '⚠️ 설치된 모델이 없습니다. Ollama에서 모델을 먼저 설치하세요.';
@@ -91,61 +147,74 @@ export class OSBASettingTab extends PluginSettingTab {
         statusText.style.color = '#ff6b6b';
       }
 
-      // Generation Model 선택
-      const genModels = await this.plugin.providerManager.listOllamaModels();
+      if (this.plugin.settings.showMacMlxGuidance) {
+        const mlxNotice = containerEl.createDiv({ cls: 'setting-item-description' });
+        mlxNotice.style.marginBottom = '1rem';
+        mlxNotice.setText(
+          isMac
+            ? 'Mac에서는 최신 Ollama와 Apple Silicon 환경을 사용하면 MLX 기반 최적화 경로를 활용할 수 있습니다. 이 플러그인은 실행 중인 Ollama 서버에 연결만 하며, MLX 실행 자체는 Ollama 앱/런타임이 담당합니다.'
+            : '이 안내는 Mac 사용자용입니다. MLX 실행 자체는 Ollama 앱/런타임이 담당하고, 플러그인은 실행 중인 Ollama 서버에 연결만 합니다.'
+        );
+      }
 
-      new Setting(containerEl)
-        .setName('Generation Model')
-        .setDesc('텍스트 생성에 사용할 모델');
-
-      if (genModels.length > 0) {
+      if (availableModels.length > 0) {
         new Setting(containerEl)
+          .setName('생성 모델')
+          .setDesc(
+            this.plugin.settings.ollamaGemmaPreset === 'manual'
+              ? '텍스트 생성에 사용할 로컬 모델'
+              : '프리셋이 적용된 생성 모델입니다. 직접 선택으로 바꾸면 수동 변경할 수 있습니다.'
+          )
           .addDropdown(dropdown => {
             dropdown.addOption('', '-- 모델 선택 --');
-            genModels.forEach(model => {
+            availableModels.forEach(model => {
               dropdown.addOption(model, model);
             });
             dropdown.setValue(this.plugin.settings.ollamaGenerationModel || '');
             dropdown.onChange(async (value) => {
-              if (value) {
-                this.plugin.settings.ollamaGenerationModel = value;
-                await this.plugin.saveSettings();
-              }
+              this.plugin.settings.ollamaGenerationModel = value;
+              this.plugin.settings.ollamaGemmaPreset = 'manual';
+              await this.plugin.saveSettings();
+              this.display();
             });
           });
       } else {
         new Setting(containerEl)
+          .setName('생성 모델')
+          .setDesc(
+            this.plugin.settings.ollamaGemmaPreset === 'manual'
+              ? '텍스트 생성에 사용할 로컬 모델'
+              : '프리셋이 적용된 생성 모델입니다. 직접 선택으로 바꾸면 수동 변경할 수 있습니다.'
+          )
           .addText(text => text
             .setPlaceholder('예: gemma:2b')
             .setValue(this.plugin.settings.ollamaGenerationModel)
             .onChange(async (value) => {
               this.plugin.settings.ollamaGenerationModel = value;
+              this.plugin.settings.ollamaGemmaPreset = 'manual';
               await this.plugin.saveSettings();
             }));
       }
 
-      // Embedding Model 선택
-      new Setting(containerEl)
-        .setName('Embedding Model')
-        .setDesc('벡터 임베딩에 사용할 모델 (nomic-embed-text 권장)');
-
-      if (genModels.length > 0) {
+      if (availableModels.length > 0) {
         new Setting(containerEl)
+          .setName('임베딩 모델')
+          .setDesc('벡터 임베딩에 사용할 로컬 모델 (`nomic-embed-text` 권장)')
           .addDropdown(dropdown => {
             dropdown.addOption('', '-- 모델 선택 --');
-            genModels.forEach(model => {
+            availableModels.forEach(model => {
               dropdown.addOption(model, model);
             });
             dropdown.setValue(this.plugin.settings.ollamaEmbeddingModel || '');
             dropdown.onChange(async (value) => {
-              if (value) {
-                this.plugin.settings.ollamaEmbeddingModel = value;
-                await this.plugin.saveSettings();
-              }
+              this.plugin.settings.ollamaEmbeddingModel = value;
+              await this.plugin.saveSettings();
             });
           });
       } else {
         new Setting(containerEl)
+          .setName('임베딩 모델')
+          .setDesc('벡터 임베딩에 사용할 로컬 모델 (`nomic-embed-text` 권장)')
           .addText(text => text
             .setPlaceholder('예: nomic-embed-text')
             .setValue(this.plugin.settings.ollamaEmbeddingModel)
@@ -154,172 +223,182 @@ export class OSBASettingTab extends PluginSettingTab {
               await this.plugin.saveSettings();
             }));
       }
+
+      const ollamaModeNotice = containerEl.createDiv({ cls: 'setting-item-description' });
+      ollamaModeNotice.style.marginBottom = '1rem';
+      ollamaModeNotice.setText('Ollama 모드가 켜져 있어 아래 클라우드 AI API 키와 모델 선택은 비활성화됩니다.');
     }
 
     // ============================================
     // API Keys Section
     // ============================================
 
-    containerEl.createEl('h2', { text: '🔑 API 키 설정' });
+    if (!this.plugin.settings.useOllama) {
+      containerEl.createEl('h2', { text: '🔑 API 키 설정' });
 
-    new Setting(containerEl)
-      .setName('Gemini API Key')
-      .setDesc('Google AI Studio에서 발급받은 API 키')
-      .addText(text => text
-        .setPlaceholder('Enter Gemini API key')
-        .setValue(this.plugin.settings.geminiApiKey)
-        .onChange(async (value) => {
-          this.plugin.settings.geminiApiKey = value;
-          await this.plugin.saveSettings();
-        }))
-      .addButton(button => button
-        .setButtonText('테스트')
-        .onClick(async () => {
-          await this.testConnection('gemini');
-        }));
+      new Setting(containerEl)
+        .setName('Gemini API Key')
+        .setDesc('Google AI Studio에서 발급받은 API 키')
+        .addText(text => text
+          .setPlaceholder('Enter Gemini API key')
+          .setValue(this.plugin.settings.geminiApiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.geminiApiKey = value;
+            await this.plugin.saveSettings();
+          }))
+        .addButton(button => button
+          .setButtonText('테스트')
+          .onClick(async () => {
+            await this.testConnection('gemini');
+          }));
 
-    new Setting(containerEl)
-      .setName('Claude API Key')
-      .setDesc('Anthropic Console에서 발급받은 API 키')
-      .addText(text => text
-        .setPlaceholder('Enter Claude API key')
-        .setValue(this.plugin.settings.claudeApiKey)
-        .onChange(async (value) => {
-          this.plugin.settings.claudeApiKey = value;
-          await this.plugin.saveSettings();
-        }))
-      .addButton(button => button
-        .setButtonText('테스트')
-        .onClick(async () => {
-          await this.testConnection('claude');
-        }));
+      new Setting(containerEl)
+        .setName('Claude API Key')
+        .setDesc('Anthropic Console에서 발급받은 API 키')
+        .addText(text => text
+          .setPlaceholder('Enter Claude API key')
+          .setValue(this.plugin.settings.claudeApiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.claudeApiKey = value;
+            await this.plugin.saveSettings();
+          }))
+        .addButton(button => button
+          .setButtonText('테스트')
+          .onClick(async () => {
+            await this.testConnection('claude');
+          }));
 
-    new Setting(containerEl)
-      .setName('OpenAI API Key')
-      .setDesc('OpenAI Platform에서 발급받은 API 키 (OpenAI 모델/클라우드 임베딩용, Ollama만 쓸 때는 선택)')
-      .addText(text => text
-        .setPlaceholder('Enter OpenAI API key')
-        .setValue(this.plugin.settings.openaiApiKey)
-        .onChange(async (value) => {
-          this.plugin.settings.openaiApiKey = value;
-          await this.plugin.saveSettings();
-        }))
-      .addButton(button => button
-        .setButtonText('테스트')
-        .onClick(async () => {
-          await this.testConnection('openai');
-        }));
+      new Setting(containerEl)
+        .setName('OpenAI API Key')
+        .setDesc('OpenAI Platform에서 발급받은 API 키 (OpenAI 모델/클라우드 임베딩용)')
+        .addText(text => text
+          .setPlaceholder('Enter OpenAI API key')
+          .setValue(this.plugin.settings.openaiApiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.openaiApiKey = value;
+            await this.plugin.saveSettings();
+          }))
+        .addButton(button => button
+          .setButtonText('테스트')
+          .onClick(async () => {
+            await this.testConnection('openai');
+          }));
 
-    new Setting(containerEl)
-      .setName('xAI API Key')
-      .setDesc('xAI Console에서 발급받은 API 키 (Grok 모델용, 128K 컨텍스트)')
-      .addText(text => text
-        .setPlaceholder('Enter xAI API key')
-        .setValue(this.plugin.settings.xaiApiKey)
-        .onChange(async (value) => {
-          this.plugin.settings.xaiApiKey = value;
-          await this.plugin.saveSettings();
-        }))
-      .addButton(button => button
-        .setButtonText('테스트')
-        .onClick(async () => {
-          await this.testConnection('xai');
-        }));
+      new Setting(containerEl)
+        .setName('xAI API Key')
+        .setDesc('xAI Console에서 발급받은 API 키 (Grok 모델용, 128K 컨텍스트)')
+        .addText(text => text
+          .setPlaceholder('Enter xAI API key')
+          .setValue(this.plugin.settings.xaiApiKey)
+          .onChange(async (value) => {
+            this.plugin.settings.xaiApiKey = value;
+            await this.plugin.saveSettings();
+          }))
+        .addButton(button => button
+          .setButtonText('테스트')
+          .onClick(async () => {
+            await this.testConnection('xai');
+          }));
+    }
 
     // ============================================
     // Model Selection Section
     // ============================================
 
-    containerEl.createEl('h2', { text: '🤖 모델 선택' });
+    if (!this.plugin.settings.useOllama) {
+      containerEl.createEl('h2', { text: '🤖 모델 선택' });
 
-    new Setting(containerEl)
-      .setName('Quick Draft 모델')
-      .setDesc('빠른 초안 작성에 사용할 모델 (속도 우선) - 2025년 12월 기준')
-      .addDropdown(dropdown => dropdown
-        .addOption('gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite ($0.10/1M, 가장 저렴)')
-        .addOption('gemini-2.5-flash', 'Gemini 2.5 Flash ($0.15/1M, 1M 컨텍스트)')
-        .addOption('gpt-4.1-nano', 'GPT-4.1 nano (가장 빠름, 1M 컨텍스트)')
-        .addOption('gpt-4.1-mini', 'GPT-4.1 mini ($0.40/1M, 1M 컨텍스트)')
-        .addOption('claude-sonnet-4', 'Claude Sonnet 4 ($3.00/1M)')
-        .addOption('grok-4-fast', 'Grok 4.1 Fast ($2.00/1M, 128K 컨텍스트)')
-        .setValue(this.plugin.settings.quickDraftModel)
-        .onChange(async (value) => {
-          this.plugin.settings.quickDraftModel = value as 'gemini-2.5-flash-lite' | 'gemini-2.5-flash' | 'gpt-4.1-nano' | 'gpt-4.1-mini' | 'claude-sonnet-4' | 'grok-4-fast';
-          await this.plugin.saveSettings();
-        }));
+      new Setting(containerEl)
+        .setName('Quick Draft 모델')
+        .setDesc('빠른 초안 작성에 사용할 모델 (속도 우선) - 2025년 12월 기준')
+        .addDropdown(dropdown => dropdown
+          .addOption('gemini-2.5-flash-lite', 'Gemini 2.5 Flash-Lite ($0.10/1M, 가장 저렴)')
+          .addOption('gemini-2.5-flash', 'Gemini 2.5 Flash ($0.15/1M, 1M 컨텍스트)')
+          .addOption('gpt-4.1-nano', 'GPT-4.1 nano (가장 빠름, 1M 컨텍스트)')
+          .addOption('gpt-4.1-mini', 'GPT-4.1 mini ($0.40/1M, 1M 컨텍스트)')
+          .addOption('claude-sonnet-4', 'Claude Sonnet 4 ($3.00/1M)')
+          .addOption('grok-4-fast', 'Grok 4.1 Fast ($2.00/1M, 128K 컨텍스트)')
+          .setValue(this.plugin.settings.quickDraftModel)
+          .onChange(async (value) => {
+            this.plugin.settings.quickDraftModel = value as 'gemini-2.5-flash-lite' | 'gemini-2.5-flash' | 'gpt-4.1-nano' | 'gpt-4.1-mini' | 'claude-sonnet-4' | 'grok-4-fast';
+            await this.plugin.saveSettings();
+          }));
 
-    new Setting(containerEl)
-      .setName('분석 모델')
-      .setDesc('노트 분석 및 연결 탐색에 사용할 모델 (품질 우선) - 2025년 12월 기준')
-      .addDropdown(dropdown => dropdown
-        .addOption('claude-sonnet-4', 'Claude Sonnet 4 ($3.00/1M)')
-        .addOption('claude-opus-4', 'Claude Opus 4 ($15.00/1M)')
-        .addOption('claude-opus-4.5', 'Claude Opus 4.5 ($5.00/1M, 최신)')
-        .addOption('gemini-2.5-pro', 'Gemini 2.5 Pro ($1.25/1M, 1M 컨텍스트)')
-        .addOption('gpt-4.1', 'GPT-4.1 ($2.00/1M, 1M 컨텍스트)')
-        .addOption('gpt-4o', 'GPT-4o ($2.50/1M)')
-        .addOption('grok-4-fast', 'Grok 4.1 Fast ($2.00/1M, 128K 컨텍스트)')
-        .setValue(this.plugin.settings.analysisModel)
-        .onChange(async (value) => {
-          this.plugin.settings.analysisModel = value as 'claude-sonnet-4' | 'claude-opus-4' | 'claude-opus-4.5' | 'gemini-2.5-pro' | 'gpt-4.1' | 'gpt-4o' | 'grok-4-fast';
-          await this.plugin.saveSettings();
-        }));
+      new Setting(containerEl)
+        .setName('분석 모델')
+        .setDesc('노트 분석 및 연결 탐색에 사용할 모델 (품질 우선) - 2025년 12월 기준')
+        .addDropdown(dropdown => dropdown
+          .addOption('claude-sonnet-4', 'Claude Sonnet 4 ($3.00/1M)')
+          .addOption('claude-opus-4', 'Claude Opus 4 ($15.00/1M)')
+          .addOption('claude-opus-4.5', 'Claude Opus 4.5 ($5.00/1M, 최신)')
+          .addOption('gemini-2.5-pro', 'Gemini 2.5 Pro ($1.25/1M, 1M 컨텍스트)')
+          .addOption('gpt-4.1', 'GPT-4.1 ($2.00/1M, 1M 컨텍스트)')
+          .addOption('gpt-4o', 'GPT-4o ($2.50/1M)')
+          .addOption('grok-4-fast', 'Grok 4.1 Fast ($2.00/1M, 128K 컨텍스트)')
+          .setValue(this.plugin.settings.analysisModel)
+          .onChange(async (value) => {
+            this.plugin.settings.analysisModel = value as 'claude-sonnet-4' | 'claude-opus-4' | 'claude-opus-4.5' | 'gemini-2.5-pro' | 'gpt-4.1' | 'gpt-4o' | 'grok-4-fast';
+            await this.plugin.saveSettings();
+          }));
 
-    new Setting(containerEl)
-      .setName('임베딩 모델')
-      .setDesc('벡터 임베딩 생성에 사용할 모델')
-      .addDropdown(dropdown => dropdown
-        .addOption('openai-small', 'text-embedding-3-small ($0.02/1M)')
-        .addOption('openai-large', 'text-embedding-3-large ($0.13/1M)')
-        .setValue(this.plugin.settings.embeddingModel)
-        .onChange(async (value) => {
-          this.plugin.settings.embeddingModel = value as 'openai-small' | 'openai-large';
-          await this.plugin.saveSettings();
-        }));
+      new Setting(containerEl)
+        .setName('임베딩 모델')
+        .setDesc('벡터 임베딩 생성에 사용할 모델')
+        .addDropdown(dropdown => dropdown
+          .addOption('openai-small', 'text-embedding-3-small ($0.02/1M)')
+          .addOption('openai-large', 'text-embedding-3-large ($0.13/1M)')
+          .setValue(this.plugin.settings.embeddingModel)
+          .onChange(async (value) => {
+            this.plugin.settings.embeddingModel = value as 'openai-small' | 'openai-large';
+            await this.plugin.saveSettings();
+          }));
+    }
 
     // ============================================
     // Custom Model Settings Section
     // ============================================
 
-    containerEl.createEl('h2', { text: '🔧 커스텀 모델 설정' });
-    containerEl.createEl('p', {
-      text: '드롭다운에 없는 모델을 직접 지정하려면 아래 설정을 활성화하세요.',
-      cls: 'setting-item-description'
-    });
-
-    new Setting(containerEl)
-      .setName('커스텀 모델 사용')
-      .setDesc('활성화하면 드롭다운 선택을 무시하고 아래 입력한 모델명을 사용합니다')
-      .addToggle(toggle => toggle
-        .setValue(this.plugin.settings.useCustomModels)
-        .onChange(async (value) => {
-          this.plugin.settings.useCustomModels = value;
-          await this.plugin.saveSettings();
-          this.display(); // 화면 새로고침하여 커스텀 필드 표시/숨김
-        }));
-
-    if (this.plugin.settings.useCustomModels) {
-      new Setting(containerEl)
-        .setName('Quick Draft 커스텀 모델')
-        .setDesc('예: grok-4, gemini-2.5-flash-preview-05-20')
-        .addText(text => text
-          .setPlaceholder('모델 ID를 직접 입력')
-          .setValue(this.plugin.settings.customQuickDraftModel)
-          .onChange(async (value) => {
-            this.plugin.settings.customQuickDraftModel = value;
-            await this.plugin.saveSettings();
-          }));
+    if (!this.plugin.settings.useOllama) {
+      containerEl.createEl('h2', { text: '🔧 커스텀 모델 설정' });
+      containerEl.createEl('p', {
+        text: '드롭다운에 없는 모델을 직접 지정하려면 아래 설정을 활성화하세요.',
+        cls: 'setting-item-description'
+      });
 
       new Setting(containerEl)
-        .setName('분석 커스텀 모델')
-        .setDesc('예: claude-3-5-sonnet-20241022, grok-4')
-        .addText(text => text
-          .setPlaceholder('모델 ID를 직접 입력')
-          .setValue(this.plugin.settings.customAnalysisModel)
+        .setName('커스텀 모델 사용')
+        .setDesc('활성화하면 드롭다운 선택을 무시하고 아래 입력한 모델명을 사용합니다')
+        .addToggle(toggle => toggle
+          .setValue(this.plugin.settings.useCustomModels)
           .onChange(async (value) => {
-            this.plugin.settings.customAnalysisModel = value;
+            this.plugin.settings.useCustomModels = value;
             await this.plugin.saveSettings();
+            this.display();
           }));
+
+      if (this.plugin.settings.useCustomModels) {
+        new Setting(containerEl)
+          .setName('Quick Draft 커스텀 모델')
+          .setDesc('예: grok-4, gemini-2.5-flash-preview-05-20')
+          .addText(text => text
+            .setPlaceholder('모델 ID를 직접 입력')
+            .setValue(this.plugin.settings.customQuickDraftModel)
+            .onChange(async (value) => {
+              this.plugin.settings.customQuickDraftModel = value;
+              await this.plugin.saveSettings();
+            }));
+
+        new Setting(containerEl)
+          .setName('분석 커스텀 모델')
+          .setDesc('예: claude-3-5-sonnet-20241022, grok-4')
+          .addText(text => text
+            .setPlaceholder('모델 ID를 직접 입력')
+            .setValue(this.plugin.settings.customAnalysisModel)
+            .onChange(async (value) => {
+              this.plugin.settings.customAnalysisModel = value;
+              await this.plugin.saveSettings();
+            }));
+      }
     }
 
     // ============================================
@@ -563,49 +642,34 @@ export class OSBASettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('전체 볼트 인덱싱')
-      .setDesc('모든 노트에 대해 임베딩 생성 (시간이 걸릴 수 있음)')
+      .setDesc('미인덱싱 노트와 변경된 노트만 다시 인덱싱합니다')
       .addButton(button => button
         .setButtonText('인덱싱 시작')
         .setCta()
         .onClick(async () => {
-          const modal = new ProgressModal(this.app, '볼트 인덱싱');
-          modal.open();
-          modal.updateState({ message: '인덱싱 준비 중...' });
-
           try {
-            // Job Queue의 진행 상황을 추적
-            const files = this.app.vault.getMarkdownFiles()
-              .filter((f) => !this.plugin.isExcluded(f));
-
-            const total = files.length;
-            let processed = 0;
-
-            modal.updateState({
-              message: `총 ${total}개 노트 인덱싱 시작`,
-              subMessage: '잠시 기다려주세요...'
-            });
-
-            for (const file of files) {
-              try {
-                await this.plugin.embeddingService?.processNote(file);
-                processed++;
-                const progress = Math.round((processed / total) * 100);
-                modal.updateProgress(progress, `${processed}/${total} 처리 중`);
-                modal.updateState({
-                  subMessage: file.basename
-                });
-              } catch (err) {
-                console.error(`Failed to index ${file.path}:`, err);
-                // Continue with next file
-              }
-            }
-
-            modal.complete(`✅ ${processed}/${total} 노트 인덱싱 완료!`);
-            setTimeout(() => modal.close(), 2000);
-
+            await this.plugin.batchIndexVault();
           } catch (error) {
-            modal.setError(error instanceof Error ? error.message : '인덱싱 실패');
+            new Notice(error instanceof Error ? error.message : '인덱싱 실패');
           }
+        }));
+
+    new Setting(containerEl)
+      .setName('현재 노트 인덱싱')
+      .setDesc('현재 열려 있는 노트만 즉시 최신 상태로 인덱싱합니다')
+      .addButton(button => button
+        .setButtonText('현재 노트 인덱싱')
+        .onClick(async () => {
+          const activeFile = this.app.workspace.getActiveFile();
+          if (!activeFile) {
+            new Notice('먼저 인덱싱할 노트를 열어주세요.');
+            return;
+          }
+
+          await this.plugin.generateEmbedding(activeFile, {
+            force: true,
+            reason: '현재 노트',
+          });
         }));
 
     new Setting(containerEl)

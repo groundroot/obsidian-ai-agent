@@ -37,6 +37,8 @@ export interface OSBASettings {
   ollamaBaseUrl: string;
   ollamaGenerationModel: string;
   ollamaEmbeddingModel: string;
+  showMacMlxGuidance: boolean;
+  ollamaGemmaPreset: 'manual' | 'gemma-fast' | 'gemma-latest';
 
   // Custom Model Names (for manual override)
   useCustomModels: boolean;
@@ -82,6 +84,8 @@ export const DEFAULT_SETTINGS: OSBASettings = {
   ollamaBaseUrl: 'http://localhost:11434',
   ollamaGenerationModel: '',
   ollamaEmbeddingModel: '',
+  showMacMlxGuidance: false,
+  ollamaGemmaPreset: 'manual',
 
   useCustomModels: false,
   customQuickDraftModel: '',
@@ -224,6 +228,10 @@ export interface OSBAFrontmatter {
   version: number;
   lastAnalyzed?: string;  // ISO8601
   embeddingId?: string;
+  indexedAt?: string;  // ISO8601
+  embeddingModel?: string;
+  embeddingHash?: string;
+  indexStatus?: 'indexed' | 'stale';
   confidenceScore?: number;  // 0-1
   related?: {
     path: string;
@@ -303,6 +311,13 @@ export interface UsageSummary {
   byModel: Record<string, number>;
   byOperation: Record<string, number>;
   requestCount: number;
+}
+
+export interface NoteIndexStatus {
+  status: 'excluded' | 'not_indexed' | 'stale' | 'indexed';
+  contentHash: string;
+  noteId?: number;
+  embeddingId?: number;
 }
 
 // Alias for backward compatibility

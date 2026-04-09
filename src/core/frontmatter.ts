@@ -19,9 +19,11 @@ export class FrontmatterManager {
   async updateNoteFrontmatter(file: TFile, result: AnalysisResult): Promise<void> {
     const content = await this.app.vault.read(file);
     const { frontmatter, body } = this.parseFrontmatter(content);
+    const existingOsba: OSBAFrontmatter = frontmatter.osba || { version: 1 };
 
     // Create or update OSBA namespace in frontmatter
     const osbaData: OSBAFrontmatter = {
+      ...existingOsba,
       version: 1,
       lastAnalyzed: new Date().toISOString(),
       confidenceScore: this.calculateOverallConfidence(result),
@@ -82,8 +84,60 @@ export class FrontmatterManager {
     const { frontmatter, body } = this.parseFrontmatter(content);
 
     // Get or create OSBA namespace
-    const osbaData: OSBAFrontmatter = frontmatter.osba || { version: 1 };
+    const osbaData: OSBAFrontmatter = {
+      ...(frontmatter.osba || { version: 1 }),
+      version: 1,
+    };
     osbaData.embeddingId = embeddingId;
+
+    const updatedFrontmatter = {
+      ...frontmatter,
+      osba: osbaData
+    };
+
+    const newContent = this.buildContent(updatedFrontmatter, body);
+    await this.app.vault.modify(file, newContent);
+  }
+
+  async updateEmbeddingStatus(
+    file: TFile,
+    data: {
+      embeddingId: string;
+      embeddingHash: string;
+      embeddingModel: string;
+      indexedAt?: string;
+      indexStatus?: 'indexed' | 'stale';
+    }
+  ): Promise<void> {
+    const content = await this.app.vault.read(file);
+    const { frontmatter, body } = this.parseFrontmatter(content);
+
+    const osbaData: OSBAFrontmatter = frontmatter.osba || { version: 1 };
+    osbaData.embeddingId = data.embeddingId;
+    osbaData.embeddingHash = data.embeddingHash;
+    osbaData.embeddingModel = data.embeddingModel;
+    osbaData.indexedAt = data.indexedAt || new Date().toISOString();
+    osbaData.indexStatus = data.indexStatus || 'indexed';
+
+    const updatedFrontmatter = {
+      ...frontmatter,
+      osba: osbaData
+    };
+
+    const newContent = this.buildContent(updatedFrontmatter, body);
+    await this.app.vault.modify(file, newContent);
+  }
+
+  async markEmbeddingStale(file: TFile): Promise<void> {
+    const content = await this.app.vault.read(file);
+    const { frontmatter, body } = this.parseFrontmatter(content);
+    const osbaData: OSBAFrontmatter = frontmatter.osba || { version: 1 };
+
+    if (!osbaData.embeddingId || osbaData.indexStatus === 'stale') {
+      return;
+    }
+
+    osbaData.indexStatus = 'stale';
 
     const updatedFrontmatter = {
       ...frontmatter,

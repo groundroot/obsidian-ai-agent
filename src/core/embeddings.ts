@@ -3,17 +3,16 @@
  * OpenAI 임베딩 생성, 저장, 유사도 검색
  */
 
-import { TFile, Vault, MetadataCache } from 'obsidian';
+import { TFile, Vault, MetadataCache, parseYaml, stringifyYaml } from 'obsidian';
 import { Database } from '../db/database';
 import { AIProviderManager } from '../api/provider';
 import {
   OSBASettings,
-  NoteMetadata,
-  EmbeddingResult,
   SearchResult,
   RAGContext,
-  OSBAError,
   BudgetExceededError,
+  NoteIndexStatus,
+  EmbeddingResult,
 } from '../types';
 import * as crypto from 'crypto';
 
@@ -63,7 +62,14 @@ export class EmbeddingService {
   /**
    * 노트 임베딩 생성 및 저장
    */
-  async processNote(file: TFile): Promise<{ success: boolean; cached: boolean; cost: number }> {
+  async processNote(file: TFile): Promise<{
+    success: boolean;
+    cached: boolean;
+    cost: number;
+    noteId?: number;
+    model?: string;
+    contentHash?: string;
+  }> {
     const path = file.path;
 
     // 이미 처리 중인지 확인
@@ -80,7 +86,8 @@ export class EmbeddingService {
 
     try {
       // 노트 내용 읽기
-      const content = await this.vault.cachedRead(file);
+      const rawContent = await this.vault.cachedRead(file);
+      const content = this.normalizeIndexableContent(rawContent);
 
       // 너무 작은 파일 무시
       if (content.length < 100) {
@@ -95,6 +102,20 @@ export class EmbeddingService {
 
       // 콘텐츠 해시 계산
       const contentHash = this.computeHash(content);
+      const existingNote = await this.database.getNoteByPath(path);
+
+      if (existingNote?.embeddingId && existingNote.contentHash === contentHash) {
+        return {
+          success: true,
+          cached: true,
+          cost: 0,
+          noteId: existingNote.id,
+          model: this.settings.useOllama
+            ? this.settings.ollamaEmbeddingModel
+            : this.settings.embeddingModel,
+          contentHash,
+        };
+      }
 
       // 캐시 확인
       const cachedEmbedding = await this.database.getCachedEmbedding(contentHash);
@@ -106,7 +127,16 @@ export class EmbeddingService {
           content
         );
         await this.database.storeEmbedding(noteId, cachedEmbedding);
-        return { success: true, cached: true, cost: 0 };
+        return {
+          success: true,
+          cached: true,
+          cost: 0,
+          noteId,
+          model: this.settings.useOllama
+            ? this.settings.ollamaEmbeddingModel
+            : this.settings.embeddingModel,
+          contentHash,
+        };
       }
 
       // 예산 체크
@@ -130,7 +160,7 @@ export class EmbeddingService {
 
       // 사용량 로깅
       await this.database.logUsage({
-        provider: 'openai',
+        provider: embedding.cost === 0 ? 'ollama' : 'openai',
         model: embedding.model,
         operation: 'embedding',
         inputTokens: embedding.inputTokens,
@@ -139,7 +169,14 @@ export class EmbeddingService {
         notePath: path,
       });
 
-      return { success: true, cached: false, cost: embedding.cost };
+      return {
+        success: true,
+        cached: false,
+        cost: embedding.cost,
+        noteId,
+        model: embedding.model,
+        contentHash,
+      };
 
     } catch (error) {
       if (error instanceof BudgetExceededError) {
@@ -213,7 +250,8 @@ export class EmbeddingService {
     file: TFile,
     limit: number = 10
   ): Promise<SearchResult[]> {
-    const content = await this.vault.cachedRead(file);
+    const rawContent = await this.vault.cachedRead(file);
+    const content = this.normalizeIndexableContent(rawContent);
     const contentHash = this.computeHash(content);
 
     // 기존 임베딩 확인
@@ -226,7 +264,7 @@ export class EmbeddingService {
     }
 
     // 유사도 검색
-    const results = await this.database.findSimilar(embedding, limit + 1);
+    const results = await this.database.findSimilar(embedding!, limit + 1);
 
     // 자기 자신 제외
     return results.filter(r => r.notePath !== file.path).slice(0, limit);
@@ -238,6 +276,44 @@ export class EmbeddingService {
   async searchByQuery(query: string, limit: number = 10): Promise<SearchResult[]> {
     const result = await this.generateEmbedding(query);
     return this.database.findSimilar(result.embedding, limit);
+  }
+
+  async getIndexStatus(file: TFile): Promise<NoteIndexStatus> {
+    if (this.isExcluded(file.path)) {
+      return {
+        status: 'excluded',
+        contentHash: '',
+      };
+    }
+
+    const rawContent = await this.vault.cachedRead(file);
+    const content = this.normalizeIndexableContent(rawContent);
+    const contentHash = this.computeHash(content);
+    const note = await this.database.getNoteByPath(file.path);
+
+    if (!note || !note.embeddingId) {
+      return {
+        status: 'not_indexed',
+        contentHash,
+        noteId: note?.id,
+      };
+    }
+
+    if (note.contentHash !== contentHash) {
+      return {
+        status: 'stale',
+        contentHash,
+        noteId: note.id,
+        embeddingId: note.embeddingId,
+      };
+    }
+
+    return {
+      status: 'indexed',
+      contentHash,
+      noteId: note.id,
+      embeddingId: note.embeddingId,
+    };
   }
 
   // ============================================
@@ -447,6 +523,33 @@ export class EmbeddingService {
 
   private computeHash(content: string): string {
     return crypto.createHash('md5').update(content).digest('hex');
+  }
+
+  private normalizeIndexableContent(content: string): string {
+    const withoutInsights = content
+      .replace(/\n?## 🧠 Connected Insights[\s\S]*?(?=\n## |\n---|\s*$)/g, '\n')
+      .trim();
+
+    const frontmatterRegex = /^---\n([\s\S]*?)\n---\n?/;
+    const match = withoutInsights.match(frontmatterRegex);
+
+    if (!match) {
+      return withoutInsights.trim();
+    }
+
+    try {
+      const frontmatter = parseYaml(match[1]) || {};
+      delete frontmatter.osba;
+
+      const body = withoutInsights.slice(match[0].length).trim();
+      if (Object.keys(frontmatter).length === 0) {
+        return body;
+      }
+
+      return `---\n${stringifyYaml(frontmatter).trim()}\n---\n${body}`.trim();
+    } catch (error) {
+      return withoutInsights.trim();
+    }
   }
 
   private isExcluded(path: string): boolean {

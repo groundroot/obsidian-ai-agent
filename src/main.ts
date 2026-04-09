@@ -336,6 +336,7 @@ export default class OSBAPlugin extends Plugin {
     this.registerEvent(
       this.app.vault.on('modify', async (file) => {
         if (file instanceof TFile && file.extension === 'md') {
+          await this.syncIndexStatus(file);
           if (this.settings.autoEmbedOnModify) {
             // Debounce embedding updates
             this.debounceEmbedding(file);
@@ -374,7 +375,7 @@ export default class OSBAPlugin extends Plugin {
 
     const timeout = setTimeout(async () => {
       this.embeddingDebounceMap.delete(file.path);
-      await this.generateEmbedding(file);
+      await this.generateEmbedding(file, { silent: true, reason: '자동 업데이트' });
     }, 5000); // 5 second debounce
 
     this.embeddingDebounceMap.set(file.path, timeout);
@@ -479,17 +480,50 @@ ${userPrompt}
 Generate the markdown content for the note:`;
   }
 
-  async generateEmbedding(file: TFile): Promise<void> {
+  async generateEmbedding(
+    file: TFile,
+    options: { silent?: boolean; force?: boolean; reason?: string } = {}
+  ): Promise<void> {
     try {
       // Check if excluded
       if (this.isExcluded(file)) {
+        if (!options.silent) {
+          new Notice('이 노트는 인덱싱 대상에서 제외되었습니다.');
+        }
         return;
       }
 
-      await this.embeddingService.processNote(file);
+      if (!options.force) {
+        const status = await this.embeddingService.getIndexStatus(file);
+        if (status.status === 'indexed') {
+          if (!options.silent) {
+            new Notice('이미 최신 상태로 인덱싱되어 있습니다.');
+          }
+          return;
+        }
+      }
+
+      const result = await this.embeddingService.processNote(file);
+
+      if (result.success && result.noteId && result.contentHash && result.model) {
+        await this.frontmatterManager.updateEmbeddingStatus(file, {
+          embeddingId: String(result.noteId),
+          embeddingHash: result.contentHash,
+          embeddingModel: result.model,
+          indexStatus: 'indexed',
+        });
+
+        if (!options.silent) {
+          const modeText = result.cached ? '캐시/기존 데이터로' : '새로';
+          new Notice(`${options.reason || '노트'} 인덱싱 완료 (${modeText} 처리됨)`);
+        }
+      }
 
     } catch (error) {
       console.error(`Failed to generate embedding for ${file.path}:`, error);
+      if (!options.silent) {
+        new Notice('인덱싱에 실패했습니다.');
+      }
     }
   }
 
@@ -509,6 +543,12 @@ Generate the markdown content for the note:`;
     modal.updateState({ message: '분석 준비 중...' });
 
     try {
+      const indexReady = await this.ensureNoteIndexedForAction(file, '연결 분석');
+      if (!indexReady) {
+        modal.close();
+        return;
+      }
+
       this.updateJobStatus(job.id, 'running');
 
       modal.updateProgress(30, '관련 노트 찾는 중...');
@@ -545,8 +585,12 @@ Generate the markdown content for the note:`;
 
   async findSimilarNotes(file: TFile): Promise<void> {
     try {
-      const content = await this.app.vault.read(file);
-      const similar = await this.embeddingService.searchByQuery(content, 10);
+      const indexReady = await this.ensureNoteIndexedForAction(file, '유사 노트 찾기');
+      if (!indexReady) {
+        return;
+      }
+
+      const similar = await this.embeddingService.findSimilarNotes(file, 10);
 
       // Save to frontmatter
       const similarForFrontmatter = similar.map(n => ({
@@ -572,7 +616,7 @@ Generate the markdown content for the note:`;
     }
   }
 
-  async batchIndexVault(): Promise<void> {
+  async batchIndexVault(forceReindex: boolean = false): Promise<void> {
     const job = this.createJob('batch-embed', {});
     const modal = new ProgressModal(this.app, '전체 인덱싱');
     modal.open();
@@ -581,11 +625,32 @@ Generate the markdown content for the note:`;
     try {
       this.updateJobStatus(job.id, 'running');
 
-      const files = this.app.vault.getMarkdownFiles()
+      const allFiles = this.app.vault.getMarkdownFiles()
         .filter(f => !this.isExcluded(f));
+      const files: TFile[] = [];
+
+      for (const file of allFiles) {
+        if (forceReindex) {
+          files.push(file);
+          continue;
+        }
+
+        const status = await this.embeddingService.getIndexStatus(file);
+        if (status.status === 'not_indexed' || status.status === 'stale') {
+          files.push(file);
+        }
+      }
 
       let processed = 0;
       const total = files.length;
+
+      if (total === 0) {
+        modal.complete('모든 노트가 이미 최신 인덱스 상태입니다.');
+        setTimeout(() => modal.close(), 1500);
+        new Notice('새로 인덱싱할 노트가 없습니다.');
+        this.updateJobStatus(job.id, 'completed', { processed: 0 });
+        return;
+      }
 
       modal.updateState({
         message: `총 ${total}개 노트 인덱싱 시작`,
@@ -601,7 +666,11 @@ Generate the markdown content for the note:`;
         modal.updateState({ subMessage: file.basename });
 
         // Generate embedding
-        await this.generateEmbedding(file);
+        await this.generateEmbedding(file, {
+          silent: true,
+          force: forceReindex,
+          reason: '전체 인덱싱',
+        });
 
         processed++;
         this.updateJobProgress(job.id, Math.round((processed / total) * 100));
@@ -612,7 +681,7 @@ Generate the markdown content for the note:`;
 
       // Close modal after 2 seconds
       setTimeout(() => modal.close(), 2000);
-      new Notice(`Indexed ${processed} notes`);
+      new Notice(`${processed}개 노트를 인덱싱했습니다.`);
 
     } catch (error) {
       this.updateJobStatus(job.id, 'failed', undefined, error as Error);
@@ -670,6 +739,43 @@ Generate the markdown content for the note:`;
 
   private async addInsightsSection(file: TFile, result: AnalysisResult): Promise<void> {
     await this.frontmatterManager.addInsightsSection(file, result);
+  }
+
+  async ensureNoteIndexedForAction(file: TFile, actionName: string): Promise<boolean> {
+    const status = await this.embeddingService.getIndexStatus(file);
+
+    if (status.status === 'excluded') {
+      new Notice(`이 노트는 ${actionName} 대상에서 제외되었습니다.`);
+      return false;
+    }
+
+    if (status.status === 'not_indexed' || status.status === 'stale') {
+      const message = status.status === 'stale'
+        ? `${actionName} 전에 현재 노트를 최신 상태로 다시 인덱싱합니다.`
+        : `${actionName} 전에 현재 노트를 먼저 인덱싱합니다.`;
+      new Notice(message);
+
+      await this.generateEmbedding(file, {
+        silent: true,
+        reason: actionName,
+      });
+
+      const refreshedStatus = await this.embeddingService.getIndexStatus(file);
+      return refreshedStatus.status === 'indexed';
+    }
+
+    return true;
+  }
+
+  private async syncIndexStatus(file: TFile): Promise<void> {
+    if (this.isExcluded(file)) {
+      return;
+    }
+
+    const status = await this.embeddingService.getIndexStatus(file);
+    if (status.status === 'stale') {
+      await this.frontmatterManager.markEmbeddingStale(file);
+    }
   }
 
   // ============================================
@@ -772,9 +878,14 @@ Generate the markdown content for the note:`;
   async saveSettings(): Promise<void> {
     await this.saveData(this.settings);
 
-    // Reinitialize provider manager with new settings
     if (this.providerManager) {
       this.providerManager.updateSettings(this.settings);
+    }
+    if (this.embeddingService) {
+      this.embeddingService.updateSettings(this.settings);
+    }
+    if (this.connectionAnalyzer) {
+      this.connectionAnalyzer.updateSettings(this.settings);
     }
   }
 }

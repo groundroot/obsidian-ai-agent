@@ -74,8 +74,10 @@ export class OSBAMainMenuModal extends Modal {
       this.close();
       const activeFile = this.app.workspace.getActiveFile();
       if (activeFile && activeFile.extension === 'md') {
-        this.plugin.generateEmbedding(activeFile);
-        new Notice('인덱싱 요청됨');
+        void this.plugin.generateEmbedding(activeFile, {
+          force: true,
+          reason: '현재 노트',
+        });
       } else {
         new Notice('인덱싱할 노트를 열어주세요.');
       }
@@ -205,6 +207,15 @@ export class QuickDraftModal extends Modal {
     this.resultContainer.createEl('p', { text: '생성 중...', cls: 'osba-loading' });
 
     try {
+      const activeFile = this.app.workspace.getActiveFile();
+      if (activeFile && activeFile.extension === 'md') {
+        const ready = await this.plugin.ensureNoteIndexedForAction(activeFile, '빠른 초안');
+        if (!ready) {
+          this.resultContainer.empty();
+          return;
+        }
+      }
+
       const result = await this.plugin.connectionAnalyzer.generateQuickDraft(prompt);
 
       this.resultContainer.empty();
