@@ -316,6 +316,12 @@ export class EmbeddingService {
     };
   }
 
+  async getContentHash(file: TFile): Promise<string> {
+    const rawContent = await this.vault.cachedRead(file);
+    const content = this.normalizeIndexableContent(rawContent);
+    return this.computeHash(content);
+  }
+
   // ============================================
   // RAG Context Building
   // ============================================

@@ -16,16 +16,20 @@ export class FrontmatterManager {
   /**
    * Update note frontmatter with OSBA analysis results
    */
-  async updateNoteFrontmatter(file: TFile, result: AnalysisResult): Promise<void> {
+  async updateNoteFrontmatter(file: TFile, result: AnalysisResult, analysisHash?: string): Promise<void> {
     const content = await this.app.vault.read(file);
     const { frontmatter, body } = this.parseFrontmatter(content);
     const existingOsba: OSBAFrontmatter = frontmatter.osba || { version: 1 };
+    const analyzedAt = new Date().toISOString();
 
     // Create or update OSBA namespace in frontmatter
     const osbaData: OSBAFrontmatter = {
       ...existingOsba,
       version: 1,
-      lastAnalyzed: new Date().toISOString(),
+      analyzed: true,
+      analyzedAt,
+      lastAnalyzed: analyzedAt,
+      analysisHash: analysisHash || existingOsba.analysisHash,
       confidenceScore: this.calculateOverallConfidence(result),
       related: result.connections.map(conn => ({
         path: conn.targetPath,
@@ -138,6 +142,7 @@ export class FrontmatterManager {
     }
 
     osbaData.indexStatus = 'stale';
+    osbaData.analyzed = false;
 
     const updatedFrontmatter = {
       ...frontmatter,
@@ -162,7 +167,7 @@ export class FrontmatterManager {
    */
   async isAnalyzed(file: TFile): Promise<boolean> {
     const osba = await this.getOSBAFrontmatter(file);
-    return osba?.lastAnalyzed != null;
+    return osba?.analyzed === true;
   }
 
   /**
@@ -199,6 +204,37 @@ export class FrontmatterManager {
 
     const newContent = this.buildContent(updatedFrontmatter, body);
     await this.app.vault.modify(file, newContent);
+  }
+
+  async markAnalysisCurrent(
+    file: TFile,
+    data: {
+      analysisHash: string;
+      analyzedAt?: string;
+    }
+  ): Promise<void> {
+    const content = await this.app.vault.read(file);
+    const { frontmatter, body } = this.parseFrontmatter(content);
+    const analyzedAt = data.analyzedAt || new Date().toISOString();
+
+    const osbaData: OSBAFrontmatter = frontmatter.osba || { version: 1 };
+    osbaData.analyzed = true;
+    osbaData.analyzedAt = analyzedAt;
+    osbaData.lastAnalyzed = analyzedAt;
+    osbaData.analysisHash = data.analysisHash;
+
+    const updatedFrontmatter = {
+      ...frontmatter,
+      osba: osbaData
+    };
+
+    const newContent = this.buildContent(updatedFrontmatter, body);
+    await this.app.vault.modify(file, newContent);
+  }
+
+  async isAnalysisCurrent(file: TFile, currentHash: string): Promise<boolean> {
+    const osba = await this.getOSBAFrontmatter(file);
+    return osba?.analyzed === true && osba.analysisHash === currentHash;
   }
 
   /**

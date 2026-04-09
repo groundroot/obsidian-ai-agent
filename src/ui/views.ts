@@ -4,6 +4,7 @@
  */
 
 import {
+  EventRef,
   ItemView,
   WorkspaceLeaf,
   setIcon,
@@ -28,7 +29,8 @@ export const LEGACY_COST_DASHBOARD_VIEW_TYPE = 'osba-cost-dashboard-view';
 export class JobQueueView extends ItemView {
   private plugin: OSBAPlugin;
   private contentContainer!: HTMLElement;
-  private refreshInterval: ReturnType<typeof setInterval> | null = null;
+  private eventRefs: EventRef[] = [];
+  private lastSnapshot = '';
 
   constructor(leaf: WorkspaceLeaf, plugin: OSBAPlugin) {
     super(leaf);
@@ -69,27 +71,39 @@ export class JobQueueView extends ItemView {
     // 초기 렌더링
     await this.refresh();
 
-    // 자동 새로고침 (5초마다)
-    this.refreshInterval = setInterval(() => {
-      this.refresh();
-    }, 5000);
+    // 작업 이벤트가 있을 때만 갱신해서 깜빡임을 줄임
+    this.eventRefs = [
+      this.plugin.events.on('job:created', () => this.refresh()),
+      this.plugin.events.on('job:progress', () => this.refresh()),
+      this.plugin.events.on('job:completed', () => this.refresh()),
+      this.plugin.events.on('job:failed', () => this.refresh()),
+      this.plugin.events.on('job:cancelled', () => this.refresh()),
+    ];
   }
 
   async onClose() {
-    if (this.refreshInterval) {
-      clearInterval(this.refreshInterval);
-      this.refreshInterval = null;
-    }
+    this.eventRefs.forEach(ref => this.plugin.events.offref(ref));
+    this.eventRefs = [];
   }
 
   async refresh() {
     if (!this.contentContainer) return;
 
-    this.contentContainer.empty();
-
     try {
-      // 현재 처리 중인 작업 가져오기 (실제로는 plugin에서 관리)
       const jobs = await this.getActiveJobs();
+      const snapshot = JSON.stringify(jobs.map(job => ({
+        id: job.id,
+        status: job.status,
+        progress: job.progress,
+        error: job.error,
+      })));
+
+      if (snapshot === this.lastSnapshot) {
+        return;
+      }
+
+      this.lastSnapshot = snapshot;
+      this.contentContainer.empty();
 
       if (jobs.length === 0) {
         this.renderEmptyState();
@@ -177,8 +191,9 @@ export class JobQueueView extends ItemView {
   private getJobTypeLabel(type: string): string {
     const labels: Record<string, string> = {
       embed: '📊 현재 노트 인덱싱',
-      analysis: '🔍 연결 분석',
+      analyze: '🔍 연결 분석',
       'batch-embed': '📦 전체 인덱싱',
+      'batch-analyze': '🧠 전체 연결분석',
       'quick-draft': '✨ 빠른 초안',
       'find-similar': '🔗 유사 노트 찾기',
       'vault-scan': '📦 볼트 스캔',

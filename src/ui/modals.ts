@@ -78,6 +78,7 @@ export class OSBAMainMenuModal extends Modal {
         void this.plugin.generateEmbedding(activeFile, {
           force: true,
           reason: '현재 노트',
+          analyzeAfterIndex: this.plugin.settings.autoAnalyzeAfterIndex,
         });
       } else {
         new Notice('인덱싱할 노트를 열어주세요.');
@@ -93,6 +94,11 @@ export class OSBAMainMenuModal extends Modal {
     this.createMenuButton(subGrid, '📦', '전체 인덱싱', '', 'secondary', () => {
       this.close();
       this.plugin.batchIndexVault();
+    });
+
+    this.createMenuButton(subGrid, '🧠', '전체 연결분석', '', 'secondary', () => {
+      this.close();
+      this.plugin.batchAnalyzeVault();
     });
 
     // 6. Cost Dashboard

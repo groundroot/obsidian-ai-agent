@@ -617,6 +617,16 @@ export class OSBASettingTab extends PluginSettingTab {
         }));
 
     new Setting(containerEl)
+      .setName('인덱싱 후 자동 연결분석')
+      .setDesc('수동 인덱싱과 전체 인덱싱이 끝난 뒤 연결분석을 이어서 실행')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.autoAnalyzeAfterIndex)
+        .onChange(async (value) => {
+          this.plugin.settings.autoAnalyzeAfterIndex = value;
+          await this.plugin.saveSettings();
+        }));
+
+    new Setting(containerEl)
       .setName('비용 추적 활성화')
       .setDesc('API 사용량 및 비용 추적')
       .addToggle(toggle => toggle
@@ -674,7 +684,7 @@ export class OSBASettingTab extends PluginSettingTab {
 
     new Setting(containerEl)
       .setName('전체 볼트 인덱싱')
-      .setDesc('미인덱싱 노트와 변경된 노트만 다시 인덱싱합니다')
+      .setDesc('미인덱싱 노트와 변경된 노트만 다시 인덱싱합니다. 옵션이 켜져 있으면 인덱싱 후 연결분석도 이어서 실행합니다')
       .addButton(button => button
         .setButtonText('인덱싱 시작')
         .setCta()
@@ -683,6 +693,19 @@ export class OSBASettingTab extends PluginSettingTab {
             await this.plugin.batchIndexVault();
           } catch (error) {
             new Notice(error instanceof Error ? error.message : '인덱싱 실패');
+          }
+        }));
+
+    new Setting(containerEl)
+      .setName('전체 연결분석')
+      .setDesc('볼트 전체를 순회하며 각 노트의 연결분석을 순차적으로 실행합니다')
+      .addButton(button => button
+        .setButtonText('전체 분석 시작')
+        .onClick(async () => {
+          try {
+            await this.plugin.batchAnalyzeVault();
+          } catch (error) {
+            new Notice(error instanceof Error ? error.message : '전체 연결분석 실패');
           }
         }));
 
@@ -701,6 +724,7 @@ export class OSBASettingTab extends PluginSettingTab {
           await this.plugin.generateEmbedding(activeFile, {
             force: true,
             reason: '현재 노트',
+            analyzeAfterIndex: this.plugin.settings.autoAnalyzeAfterIndex,
           });
         }));
 

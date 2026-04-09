@@ -62,6 +62,7 @@ export interface OSBASettings {
   // Feature Toggles
   autoAnalyzeOnCreate: boolean;
   autoEmbedOnModify: boolean;
+  autoAnalyzeAfterIndex: boolean;
   enableCostTracking: boolean;
 
   // Advanced
@@ -105,6 +106,7 @@ export const DEFAULT_SETTINGS: OSBASettings = {
 
   autoAnalyzeOnCreate: false,  // Default OFF to prevent unexpected API costs
   autoEmbedOnModify: true,
+  autoAnalyzeAfterIndex: false,
   enableCostTracking: true,
 
   debugMode: false,
@@ -227,6 +229,9 @@ export interface AnalysisResult {
 export interface OSBAFrontmatter {
   version: number;
   lastAnalyzed?: string;  // ISO8601
+  analyzed?: boolean;
+  analyzedAt?: string;  // ISO8601
+  analysisHash?: string;
   embeddingId?: string;
   indexedAt?: string;  // ISO8601
   embeddingModel?: string;
@@ -257,7 +262,7 @@ export interface OSBAFrontmatter {
 // ============================================
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'cancelled';
-export type JobType = 'quick-draft' | 'analyze' | 'embed' | 'batch-embed' | 'vault-scan' | 'find-similar';
+export type JobType = 'quick-draft' | 'analyze' | 'embed' | 'batch-embed' | 'batch-analyze' | 'vault-scan' | 'find-similar';
 
 export interface Job {
   id: string;

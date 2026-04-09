@@ -264,7 +264,9 @@ export default class OSBAPlugin extends Plugin {
         const activeFile = this.app.workspace.getActiveFile();
         if (activeFile && activeFile.extension === 'md') {
           if (!checking) {
-            this.generateEmbedding(activeFile);
+            this.generateEmbedding(activeFile, {
+              analyzeAfterIndex: this.settings.autoAnalyzeAfterIndex,
+            });
           }
           return true;
         }
@@ -278,6 +280,14 @@ export default class OSBAPlugin extends Plugin {
       name: 'Batch Index - Index all notes in vault',
       callback: () => {
         this.batchIndexVault();
+      },
+    });
+
+    this.addCommand({
+      id: 'batch-analyze',
+      name: 'Batch Analyze - Analyze all notes in vault',
+      callback: () => {
+        this.batchAnalyzeVault();
       },
     });
 
@@ -492,7 +502,7 @@ Generate the markdown content for the note:`;
 
   async generateEmbedding(
     file: TFile,
-    options: { silent?: boolean; force?: boolean; reason?: string } = {}
+    options: { silent?: boolean; force?: boolean; reason?: string; analyzeAfterIndex?: boolean } = {}
   ): Promise<void> {
     const job = this.createJob('embed', { path: file.path, reason: options.reason || '현재 노트 인덱싱' });
     try {
@@ -534,6 +544,15 @@ Generate the markdown content for the note:`;
           const modeText = result.cached ? '캐시/기존 데이터로' : '새로';
           new Notice(`${options.reason || '노트'} 인덱싱 완료 (${modeText} 처리됨)`);
         }
+
+        if (options.analyzeAfterIndex) {
+          await this.runNoteAnalysis(file, {
+            showFeedback: !options.silent,
+            useModal: !options.silent,
+            skipIfCurrent: true,
+            reason: `${options.reason || '인덱싱'} 후 연결분석`,
+          });
+        }
       } else {
         this.updateJobStatus(job.id, 'failed', result, new Error('인덱싱에 실패했습니다.'));
       }
@@ -548,58 +567,97 @@ Generate the markdown content for the note:`;
   }
 
   async analyzeNote(file: TFile, showFeedback: boolean = true): Promise<void> {
+    await this.runNoteAnalysis(file, {
+      showFeedback,
+      useModal: showFeedback,
+      skipIfCurrent: true,
+      reason: '연결 분석',
+    });
+  }
+
+  private async runNoteAnalysis(
+    file: TFile,
+    options: {
+      showFeedback?: boolean;
+      useModal?: boolean;
+      skipIfCurrent?: boolean;
+      reason?: string;
+    } = {}
+  ): Promise<boolean> {
+    const showFeedback = options.showFeedback ?? true;
+    const useModal = options.useModal ?? showFeedback;
+
     // Check exclusion BEFORE opening modal to prevent unnecessary UI
     if (this.isExcluded(file)) {
       if (showFeedback) {
         new Notice('이 노트는 분석에서 제외되었습니다.');
       }
       console.log(`Note excluded from analysis: ${file.path}`);
-      return;
+      return false;
     }
 
     const job = this.createJob('analyze', { path: file.path });
-    const modal = new ProgressModal(this.app, '노트 분석');
-    modal.open();
-    modal.updateState({ message: '분석 준비 중...' });
+    const modal = useModal ? new ProgressModal(this.app, '노트 분석') : null;
+    modal?.open();
+    modal?.updateState({ message: '분석 준비 중...' });
 
     try {
-      const indexReady = await this.ensureNoteIndexedForAction(file, '연결 분석');
+      const currentHash = await this.embeddingService.getContentHash(file);
+
+      if (options.skipIfCurrent && await this.frontmatterManager.isAnalysisCurrent(file, currentHash)) {
+        this.updateJobStatus(job.id, 'completed', { skipped: true, reason: 'analysis-current' });
+        if (showFeedback) {
+          new Notice('이미 최신 상태로 연결분석되어 있습니다.');
+        }
+        modal?.close();
+        return true;
+      }
+
+      const indexReady = await this.ensureNoteIndexedForAction(file, options.reason || '연결 분석', showFeedback);
       if (!indexReady) {
-        modal.close();
-        return;
+        modal?.close();
+        return false;
       }
 
       this.updateJobStatus(job.id, 'running');
 
-      modal.updateProgress(30, '관련 노트 찾는 중...');
+      modal?.updateProgress(30, '관련 노트 찾는 중...');
 
       // Actual analysis logic here logic is inside connectionAnalyzer.analyzeNote
       // But since analyzeNote is atomic in the current implementation, we can just await it
       // For better progress updates, we'd need to modify connectionAnalyzer to accept a progress callback
       // For now, we simulate progress steps 
 
-      modal.updateProgress(50, 'AI 분석 실행 중...');
+      modal?.updateProgress(50, 'AI 분석 실행 중...');
       const result = await this.connectionAnalyzer.analyzeNote(file);
 
-      modal.updateProgress(80, '결과 저장 중...');
+      modal?.updateProgress(80, '결과 저장 중...');
 
       // Update note frontmatter
-      await this.updateNoteFrontmatter(file, result);
+      await this.updateNoteFrontmatter(file, result, currentHash);
 
       // Add Connected Insights section
       await this.addInsightsSection(file, result);
 
       this.updateJobStatus(job.id, 'completed', result);
 
-      modal.complete(`✅ ${result.connections.length}개의 연결 발견!`);
-      setTimeout(() => modal.close(), 1500);
+      modal?.complete(`✅ ${result.connections.length}개의 연결 발견!`);
+      if (modal) {
+        setTimeout(() => modal.close(), 1500);
+      }
 
-      new Notice(`Analysis complete: Found ${result.connections.length} connections`);
+      if (showFeedback) {
+        new Notice(`Analysis complete: Found ${result.connections.length} connections`);
+      }
+      return true;
 
     } catch (error) {
       this.updateJobStatus(job.id, 'failed', undefined, error as Error);
-      modal.setError(error instanceof Error ? error.message : 'Analysis failed');
-      new Notice('Analysis failed. Check console for details.');
+      modal?.setError(error instanceof Error ? error.message : 'Analysis failed');
+      if (showFeedback) {
+        new Notice('Analysis failed. Check console for details.');
+      }
+      return false;
     }
   }
 
@@ -697,6 +755,7 @@ Generate the markdown content for the note:`;
           silent: true,
           force: forceReindex,
           reason: '전체 인덱싱',
+          analyzeAfterIndex: this.settings.autoAnalyzeAfterIndex,
         });
 
         processed++;
@@ -714,6 +773,78 @@ Generate the markdown content for the note:`;
       this.updateJobStatus(job.id, 'failed', undefined, error as Error);
       modal.setError(error instanceof Error ? error.message : 'Batch indexing failed');
       new Notice('Batch indexing failed');
+    }
+  }
+
+  async batchAnalyzeVault(): Promise<void> {
+    const job = this.createJob('batch-analyze', {});
+    const modal = new ProgressModal(this.app, '전체 연결분석');
+    modal.open();
+    modal.updateState({ message: '분석 준비 중...', progress: 0 });
+
+    try {
+      this.updateJobStatus(job.id, 'running');
+
+      const allFiles = this.app.vault.getMarkdownFiles()
+        .filter(f => !this.isExcluded(f));
+      const files: TFile[] = [];
+
+      for (const file of allFiles) {
+        const currentHash = await this.embeddingService.getContentHash(file);
+        const isCurrent = await this.frontmatterManager.isAnalysisCurrent(file, currentHash);
+        if (!isCurrent) {
+          files.push(file);
+        }
+      }
+
+      let processed = 0;
+      let skipped = 0;
+      const total = files.length;
+
+      if (total === 0) {
+        modal.complete('모든 노트가 이미 최신 연결분석 상태입니다.');
+        setTimeout(() => modal.close(), 1500);
+        new Notice('새로 분석할 노트가 없습니다.');
+        this.updateJobStatus(job.id, 'completed', { processed: 0, skipped: allFiles.length });
+        return;
+      }
+
+      modal.updateState({
+        message: `총 ${total}개 노트 연결분석 시작`,
+        subMessage: '잠시만 기다려주세요...'
+      });
+
+      for (const file of files) {
+        modal.updateProgress(
+          (processed / total) * 100,
+          `${processed}/${total} 분석 중`
+        );
+        modal.updateState({ subMessage: file.basename });
+
+        const analyzed = await this.runNoteAnalysis(file, {
+          showFeedback: false,
+          useModal: false,
+          skipIfCurrent: true,
+          reason: '전체 연결분석',
+        });
+
+        if (analyzed) {
+          processed++;
+        } else {
+          skipped++;
+        }
+
+        this.updateJobProgress(job.id, Math.round(((processed + skipped) / total) * 100));
+      }
+
+      this.updateJobStatus(job.id, 'completed', { processed, skipped });
+      modal.complete(`✅ ${processed}개 노트 연결분석 완료!`);
+      setTimeout(() => modal.close(), 2000);
+      new Notice(`${processed}개 노트를 연결분석했습니다.`);
+    } catch (error) {
+      this.updateJobStatus(job.id, 'failed', undefined, error as Error);
+      modal.setError(error instanceof Error ? error.message : 'Batch analysis failed');
+      new Notice('Batch analysis failed');
     }
   }
 
@@ -760,19 +891,21 @@ Generate the markdown content for the note:`;
     return false;
   }
 
-  private async updateNoteFrontmatter(file: TFile, result: AnalysisResult): Promise<void> {
-    await this.frontmatterManager.updateNoteFrontmatter(file, result);
+  private async updateNoteFrontmatter(file: TFile, result: AnalysisResult, analysisHash?: string): Promise<void> {
+    await this.frontmatterManager.updateNoteFrontmatter(file, result, analysisHash);
   }
 
   private async addInsightsSection(file: TFile, result: AnalysisResult): Promise<void> {
     await this.frontmatterManager.addInsightsSection(file, result);
   }
 
-  async ensureNoteIndexedForAction(file: TFile, actionName: string): Promise<boolean> {
+  async ensureNoteIndexedForAction(file: TFile, actionName: string, notify: boolean = true): Promise<boolean> {
     const status = await this.embeddingService.getIndexStatus(file);
 
     if (status.status === 'excluded') {
-      new Notice(`이 노트는 ${actionName} 대상에서 제외되었습니다.`);
+      if (notify) {
+        new Notice(`이 노트는 ${actionName} 대상에서 제외되었습니다.`);
+      }
       return false;
     }
 
@@ -780,10 +913,12 @@ Generate the markdown content for the note:`;
       const message = status.status === 'stale'
         ? `${actionName} 전에 현재 노트를 최신 상태로 다시 인덱싱합니다.`
         : `${actionName} 전에 현재 노트를 먼저 인덱싱합니다.`;
-      new Notice(message);
+      if (notify) {
+        new Notice(message);
+      }
 
       await this.generateEmbedding(file, {
-        silent: true,
+        silent: !notify,
         reason: actionName,
       });
 
