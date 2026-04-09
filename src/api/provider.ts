@@ -207,6 +207,11 @@ export class AIProviderManager {
     prompt: string,
     options: GenerateOptions = {}
   ): Promise<GenerateResult> {
+    // Check Ollama first (if enabled and model is configured)
+    if (this.settings.useOllama && this.settings.ollamaGenerationModel) {
+      return this.generateWithOllama(prompt, options);
+    }
+
     // Check for custom model override
     const resolvedModelKey = this.resolveModelKey(modelKey);
     const config = this.getResolvedModelConfig(resolvedModelKey, modelKey);
@@ -533,6 +538,11 @@ export class AIProviderManager {
   // ============================================
 
   async generateEmbedding(text: string, modelKey?: string): Promise<EmbeddingResult> {
+    // Check Ollama first (if enabled and model is configured)
+    if (this.settings.useOllama && this.settings.ollamaEmbeddingModel) {
+      return this.generateEmbeddingWithOllama(text);
+    }
+
     const model = modelKey || this.settings.embeddingModel;
     const config = MODEL_CONFIGS[model];
 
@@ -588,6 +598,115 @@ export class AIProviderManager {
       model: config.id,
       dimensions: embedding.length,
     };
+  }
+
+  // ============================================
+  // Ollama Support
+  // ============================================
+
+  private async generateWithOllama(
+    prompt: string,
+    options: GenerateOptions
+  ): Promise<GenerateResult> {
+    const url = `${this.settings.ollamaBaseUrl}/v1/chat/completions`;
+
+    const body = {
+      model: this.settings.ollamaGenerationModel,
+      messages: [{
+        role: 'user',
+        content: prompt
+      }],
+      temperature: options.temperature ?? 0.7,
+      top_p: options.topP ?? 0.95,
+      max_tokens: options.maxTokens || 2048,
+    };
+
+    const response = await this.makeRequest({
+      url,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }, 'ollama');
+
+    const data = JSON.parse(response);
+
+    if (!data.choices || data.choices.length === 0) {
+      throw new APIError('No response from Ollama', 'ollama', 500);
+    }
+
+    const choice = data.choices[0];
+    const text = choice.message?.content || '';
+
+    const inputTokens = data.usage?.prompt_tokens || this.estimateTokens(prompt);
+    const outputTokens = data.usage?.completion_tokens || this.estimateTokens(text);
+
+    return {
+      text,
+      inputTokens,
+      outputTokens,
+      cost: 0,  // Ollama is free (local)
+      model: this.settings.ollamaGenerationModel,
+      finishReason: choice.finish_reason === 'stop' ? 'stop' : 'length',
+    };
+  }
+
+  private async generateEmbeddingWithOllama(text: string): Promise<EmbeddingResult> {
+    const url = `${this.settings.ollamaBaseUrl}/v1/embeddings`;
+
+    // Truncate text if too long
+    const truncatedText = text.length > 8000 * 4 ? text.slice(0, 8000 * 4) : text;
+
+    const body = {
+      model: this.settings.ollamaEmbeddingModel,
+      input: truncatedText,
+    };
+
+    const response = await this.makeRequest({
+      url,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }, 'ollama');
+
+    const data = JSON.parse(response);
+
+    if (!data.data || data.data.length === 0) {
+      throw new APIError('No embedding returned from Ollama', 'ollama', 500);
+    }
+
+    const embedding = data.data[0].embedding;
+    const inputTokens = data.usage?.total_tokens || this.estimateTokens(truncatedText);
+
+    return {
+      embedding,
+      inputTokens,
+      cost: 0,  // Ollama is free (local)
+      model: this.settings.ollamaEmbeddingModel,
+      dimensions: embedding.length,
+    };
+  }
+
+  async listOllamaModels(): Promise<string[]> {
+    if (!this.settings.useOllama || !this.settings.ollamaBaseUrl) {
+      return [];
+    }
+
+    try {
+      const response = await this.makeRequest({
+        url: `${this.settings.ollamaBaseUrl}/api/tags`,
+        method: 'GET',
+      }, 'ollama');
+
+      const data = JSON.parse(response);
+      return data.models?.map((m: any) => m.name) || [];
+    } catch (error) {
+      console.error('Failed to list Ollama models:', error);
+      return [];
+    }
   }
 
   // ============================================
@@ -710,6 +829,23 @@ export class AIProviderManager {
           await this.generateText('grok-4-fast', 'Say "OK"', { maxTokens: 10 });
           return { success: true };
 
+        case 'ollama':
+          if (!this.settings.ollamaBaseUrl) {
+            return { success: false, error: 'Base URL not set' };
+          }
+          try {
+            const response = await requestUrl({
+              url: `${this.settings.ollamaBaseUrl}/api/tags`,
+              method: 'GET',
+            });
+            if (response.status >= 200 && response.status < 300) {
+              return { success: true };
+            }
+            return { success: false, error: `HTTP ${response.status}` };
+          } catch (err) {
+            return { success: false, error: 'Cannot connect to Ollama' };
+          }
+
         default:
           return { success: false, error: 'Unknown provider' };
       }
@@ -731,6 +867,8 @@ export class AIProviderManager {
         return !!this.settings.openaiApiKey;
       case 'xai':
         return !!this.settings.xaiApiKey;
+      case 'ollama':
+        return this.settings.useOllama && !!this.settings.ollamaBaseUrl;
       default:
         return false;
     }

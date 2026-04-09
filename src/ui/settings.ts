@@ -16,11 +16,145 @@ export class OSBASettingTab extends PluginSettingTab {
     this.plugin = plugin;
   }
 
-  display(): void {
+  async display(): Promise<void> {
     const { containerEl } = this;
     containerEl.empty();
 
     containerEl.createEl('h1', { text: 'Second Brain Agent 설정' });
+
+    // ============================================
+    // Ollama Settings Section
+    // ============================================
+
+    containerEl.createEl('h2', { text: '🦙 Ollama (로컬 모델)' });
+
+    new Setting(containerEl)
+      .setName('Ollama 사용')
+      .setDesc('로컬 Ollama 모델 사용 여부')
+      .addToggle(toggle => toggle
+        .setValue(this.plugin.settings.useOllama)
+        .onChange(async (value) => {
+          this.plugin.settings.useOllama = value;
+          await this.plugin.saveSettings();
+          this.display(); // 화면 새로고침
+        }));
+
+    if (this.plugin.settings.useOllama) {
+      // Ollama URL 설정
+      new Setting(containerEl)
+        .setName('Ollama Base URL')
+        .setDesc('Ollama API 서버 주소')
+        .addText(text => text
+          .setPlaceholder('http://localhost:11434')
+          .setValue(this.plugin.settings.ollamaBaseUrl)
+          .onChange(async (value) => {
+            this.plugin.settings.ollamaBaseUrl = value;
+            await this.plugin.saveSettings();
+            // URL 변경 시 모델 목록 갱신
+            this.display();
+          }))
+        .addButton(button => button
+          .setButtonText('연결 테스트')
+          .onClick(async () => {
+            const result = await this.plugin.providerManager.testConnection('ollama');
+            if (result.success) {
+              new Notice('✅ Ollama 연결 성공!');
+            } else {
+              new Notice(`❌ Ollama 연결 실패: ${result.error}`);
+            }
+          }));
+
+      // 모델 로드 상태 표시
+      const statusDiv = containerEl.createDiv();
+      statusDiv.style.marginBottom = '1rem';
+      statusDiv.style.padding = '0.75rem';
+      statusDiv.style.borderRadius = '4px';
+      statusDiv.style.backgroundColor = 'var(--background-secondary)';
+
+      const statusText = statusDiv.createEl('p');
+      statusText.style.margin = '0';
+      statusText.style.fontSize = '0.9em';
+
+      try {
+        statusText.innerHTML = '🔄 Ollama 모델 로드 중...';
+        const models = await this.plugin.providerManager.listOllamaModels();
+
+        if (models.length === 0) {
+          statusText.innerHTML = '⚠️ 설치된 모델이 없습니다. Ollama에서 모델을 먼저 설치하세요.';
+          statusText.style.color = '#ffa500';
+        } else {
+          statusText.innerHTML = `✅ ${models.length}개 모델 발견: ${models.join(', ')}`;
+          statusText.style.color = '#4CAF50';
+        }
+      } catch (error) {
+        statusText.innerHTML = '❌ 모델 목록을 불러올 수 없습니다.';
+        statusText.style.color = '#ff6b6b';
+      }
+
+      // Generation Model 선택
+      const genModels = await this.plugin.providerManager.listOllamaModels();
+
+      new Setting(containerEl)
+        .setName('Generation Model')
+        .setDesc('텍스트 생성에 사용할 모델');
+
+      if (genModels.length > 0) {
+        new Setting(containerEl)
+          .addDropdown(dropdown => {
+            dropdown.addOption('', '-- 모델 선택 --');
+            genModels.forEach(model => {
+              dropdown.addOption(model, model);
+            });
+            dropdown.setValue(this.plugin.settings.ollamaGenerationModel || '');
+            dropdown.onChange(async (value) => {
+              if (value) {
+                this.plugin.settings.ollamaGenerationModel = value;
+                await this.plugin.saveSettings();
+              }
+            });
+          });
+      } else {
+        new Setting(containerEl)
+          .addText(text => text
+            .setPlaceholder('예: gemma:2b')
+            .setValue(this.plugin.settings.ollamaGenerationModel)
+            .onChange(async (value) => {
+              this.plugin.settings.ollamaGenerationModel = value;
+              await this.plugin.saveSettings();
+            }));
+      }
+
+      // Embedding Model 선택
+      new Setting(containerEl)
+        .setName('Embedding Model')
+        .setDesc('벡터 임베딩에 사용할 모델 (nomic-embed-text 권장)');
+
+      if (genModels.length > 0) {
+        new Setting(containerEl)
+          .addDropdown(dropdown => {
+            dropdown.addOption('', '-- 모델 선택 --');
+            genModels.forEach(model => {
+              dropdown.addOption(model, model);
+            });
+            dropdown.setValue(this.plugin.settings.ollamaEmbeddingModel || '');
+            dropdown.onChange(async (value) => {
+              if (value) {
+                this.plugin.settings.ollamaEmbeddingModel = value;
+                await this.plugin.saveSettings();
+              }
+            });
+          });
+      } else {
+        new Setting(containerEl)
+          .addText(text => text
+            .setPlaceholder('예: nomic-embed-text')
+            .setValue(this.plugin.settings.ollamaEmbeddingModel)
+            .onChange(async (value) => {
+              this.plugin.settings.ollamaEmbeddingModel = value;
+              await this.plugin.saveSettings();
+            }));
+      }
+    }
 
     // ============================================
     // API Keys Section

@@ -32,6 +32,12 @@ export interface OSBASettings {
     | 'grok-4-fast';           // Grok 4.1 Fast (128K 컨텍스트)
   embeddingModel: 'openai-small' | 'openai-large';
 
+  // Ollama Settings (로컬 모델 지원)
+  useOllama: boolean;
+  ollamaBaseUrl: string;
+  ollamaGenerationModel: string;
+  ollamaEmbeddingModel: string;
+
   // Custom Model Names (for manual override)
   useCustomModels: boolean;
   customQuickDraftModel: string;
@@ -71,6 +77,11 @@ export const DEFAULT_SETTINGS: OSBASettings = {
   quickDraftModel: 'gemini-2.5-flash',
   analysisModel: 'claude-sonnet-4',
   embeddingModel: 'openai-small',
+
+  useOllama: false,
+  ollamaBaseUrl: 'http://localhost:11434',
+  ollamaGenerationModel: '',
+  ollamaEmbeddingModel: '',
 
   useCustomModels: false,
   customQuickDraftModel: '',
@@ -138,7 +149,7 @@ export interface AIProvider {
   testConnection(): Promise<{ success: boolean; error?: string }>;
 }
 
-export type ProviderType = 'gemini' | 'claude' | 'openai' | 'xai';
+export type ProviderType = 'gemini' | 'claude' | 'openai' | 'xai' | 'ollama';
 
 // ============================================
 // Note & Analysis Types
