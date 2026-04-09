@@ -11,8 +11,10 @@ import { ProgressModal } from './ui/progress-modal';
 import {
   JobQueueView,
   JOB_QUEUE_VIEW_TYPE,
+  LEGACY_JOB_QUEUE_VIEW_TYPE,
   CostDashboardView,
   COST_DASHBOARD_VIEW_TYPE,
+  LEGACY_COST_DASHBOARD_VIEW_TYPE,
   SimilarNotesView,
   SIMILAR_NOTES_VIEW_TYPE,
   KnowledgeGraphView,
@@ -187,10 +189,18 @@ export default class OSBAPlugin extends Plugin {
       JOB_QUEUE_VIEW_TYPE,
       (leaf) => new JobQueueView(leaf, this)
     );
+    this.registerView(
+      LEGACY_JOB_QUEUE_VIEW_TYPE,
+      (leaf) => new JobQueueView(leaf, this)
+    );
 
     // Cost Dashboard View
     this.registerView(
       COST_DASHBOARD_VIEW_TYPE,
+      (leaf) => new CostDashboardView(leaf, this)
+    );
+    this.registerView(
+      LEGACY_COST_DASHBOARD_VIEW_TYPE,
       (leaf) => new CostDashboardView(leaf, this)
     );
 

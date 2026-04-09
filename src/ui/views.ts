@@ -18,6 +18,8 @@ import { JobStatusInfo, UsageLog, UsageSummary } from '../types';
 
 export const JOB_QUEUE_VIEW_TYPE = 'osba-job-queue';
 export const COST_DASHBOARD_VIEW_TYPE = 'osba-cost-dashboard';
+export const LEGACY_JOB_QUEUE_VIEW_TYPE = 'osba-job-queue-view';
+export const LEGACY_COST_DASHBOARD_VIEW_TYPE = 'osba-cost-dashboard-view';
 
 // ============================================
 // Job Queue View

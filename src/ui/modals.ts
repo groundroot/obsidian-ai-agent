@@ -15,6 +15,7 @@ import {
 } from 'obsidian';
 import type OSBAPlugin from '../main';
 import { AnalysisResult, SearchResult } from '../types';
+import { COST_DASHBOARD_VIEW_TYPE, JOB_QUEUE_VIEW_TYPE } from './views';
 
 // ============================================
 // Quick Draft, Main Menu, Analysis Results, Similar Notes 등 모달 UI
@@ -97,13 +98,13 @@ export class OSBAMainMenuModal extends Modal {
     // 6. Cost Dashboard
     this.createMenuButton(subGrid, '💰', '비용 대시보드', '', 'secondary', () => {
       this.close();
-      this.plugin.activateView('osba-cost-dashboard-view');
+      this.plugin.activateView(COST_DASHBOARD_VIEW_TYPE);
     });
 
     // 7. Job Queue
     this.createMenuButton(subGrid, '⏳', '작업 대기열', '', 'secondary', () => {
       this.close();
-      this.plugin.activateView('osba-job-queue-view');
+      this.plugin.activateView(JOB_QUEUE_VIEW_TYPE);
     });
   }
 
